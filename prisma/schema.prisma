@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  walletAddress String    @unique
+  email         String?   @unique
+  name          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions          Session[]
+  subscriptions     Subscription[]
+  copySettings      CopySetting[]
+  positions         Position[]
+  trades            Trade[]
+  activityLogs      ActivityLog[]
+  notifications     Notification[]
+  portfolioSnapshots PortfolioSnapshot[]
+
+  @@index([walletAddress])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  sessionToken String   @unique
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Subscription {
+  id                    String   @id @default(cuid())
+  userId                String
+  traderWalletAddress   String
+  traderName            String?
+  traderProfileImage    String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, traderWalletAddress])
+  @@index([userId, isActive])
+  @@index([traderWalletAddress, isActive])
+  @@map("subscriptions")
+}
+
+model CopySetting {
+  id                    String   @id @default(cuid())
+  userId                String
+  traderWalletAddress   String?
+  isGlobal              Boolean  @default(false)
+  positionSizeType      String
+  positionSizeValue     Float
+  maxPositionSize       Float?
+  minTradeSize          Float?
+  stopLossPercentage    Float?
+  takeProfitPercentage  Float?
+  maxDailyLoss          Float?
+  maxConcurrentTrades   Int?
+  allowedMarketTypes    String[]
+  excludedMarketTypes   String[]
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([traderWalletAddress])
+  @@index([userId, isGlobal])
+  @@index([userId, traderWalletAddress])
+  @@map("copy_settings")
+}
+
+model Trade {
+  id                    String   @id @default(cuid())
+  userId                String
+  traderWalletAddress   String?
+  traderName            String?
+  market                String
+  asset                 String
+  conditionId           String
+  outcome               String
+  outcomeIndex          Int
+  side                  String
+  price                 Float
+  size                  Float
+  sizeIn                Float?
+  sizeOut               Float?
+  value                 Float
+  fee                   Float
+  transactionHash       String?
+  status                String
+  executionType         String
+  errorMessage          String?
+  timestamp             DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([traderWalletAddress])
+  @@index([market])
+  @@index([status])
+  @@index([timestamp])
+  @@index([userId, traderWalletAddress])
+  @@map("trades")
+}
+
+model Position {
+  id               String   @id @default(cuid())
+  userId           String
+  market           String
+  asset            String
+  conditionId      String
+  outcome          String
+  outcomeIndex     Int
+  side             String
+  entryPrice       Float
+  currentPrice     Float
+  size             Float
+  value            Float
+  unrealizedPnL    Float
+  realizedPnL      Float    @default(0)
+  status           String
+  openedAt         DateTime @default(now())
+  closedAt         DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([market])
+  @@map("positions")
+}
+
+model PortfolioSnapshot {
+  id               String   @id @default(cuid())
+  userId           String
+  totalValue       Float
+  cashBalance      Float
+  positionsValue   Float
+  totalPnL         Float
+  dailyPnL         Float
+  openPositions    Int
+  closedTrades     Int
+  winRate          Float
+  avgReturn        Float
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("portfolio_snapshots")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  description String
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("activity_logs")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  message     String
+  metadata    Json?
+  isRead      Boolean  @default(false)
+  isSent      Boolean  @default(false)
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, isSent])
+  @@map("notifications")
+}
