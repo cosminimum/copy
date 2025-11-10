@@ -101,30 +101,17 @@ async function handleTrade(trade: TradeMessage) {
   stats.tradesReceived++
   stats.lastTradeTime = new Date()
 
-  log('info', '━'.repeat(60))
-  log('info', `📊 New trade received from ${trade.name || trade.pseudonym}`)
-  log('debug', `  Wallet: ${trade.proxyWallet}`)
-  log('info', `  Market: ${trade.title}`)
-  log('info', `  Side: ${trade.side}`)
-  log('info', `  Outcome: ${trade.outcome}`)
-  log('info', `  Price: $${trade.price.toFixed(4)}`)
-  log('info', `  Size: ${trade.size}`)
-  log('info', `  Value: $${(trade.price * trade.size).toFixed(2)}`)
-  log('debug', `  Asset: ${trade.asset}`)
-  log('debug', `  Condition ID: ${trade.conditionId}`)
-  log('debug', `  Transaction: ${trade.transactionHash}`)
+  // Only log detailed info at debug level initially
+  log('debug', '━'.repeat(60))
+  log('debug', `📊 Trade from ${trade.name || trade.pseudonym}: ${trade.side} ${trade.size} ${trade.outcome} @ $${trade.price.toFixed(4)}`)
 
   try {
-    log('info', '🔄 Processing through orchestrator...')
     await orchestrator.processTradeEvent(trade)
     stats.tradesProcessed++
-    log('info', '✓ Trade processed successfully')
   } catch (error) {
     stats.tradesFailed++
     log('error', '✗ Failed to process trade:', error)
   }
-
-  log('info', '━'.repeat(60))
 }
 
 // Print statistics

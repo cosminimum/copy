@@ -15,22 +15,10 @@ export class TradeOrchestrator {
   }
 
   async processTradeEvent(trade: TradeMessage): Promise<void> {
-    this.log('info', `📥 Received trade event from ${trade.name || trade.pseudonym}`)
-    this.log('debug', 'Trade details:', {
-      market: trade.title,
-      side: trade.side,
-      outcome: trade.outcome,
-      price: trade.price,
-      size: trade.size,
-      wallet: trade.proxyWallet,
-    })
-
     try {
       // Normalize wallet address to lowercase for case-insensitive matching
       const traderWallet = trade.proxyWallet.toLowerCase()
       const traderName = trade.name || trade.pseudonym || `${traderWallet.slice(0, 6)}...${traderWallet.slice(-4)}`
-
-      this.log('debug', `Looking up subscriptions for wallet: ${traderWallet}`)
 
       // Find active subscriptions for this wallet address (no Trader table lookup needed)
       const subscriptions = await prisma.subscription.findMany({
@@ -43,14 +31,20 @@ export class TradeOrchestrator {
         },
       })
 
-      this.log('debug', `Database returned ${subscriptions.length} subscription(s)`)
-
+      // Only log detailed info if there are followers
       if (subscriptions.length === 0) {
-        this.log('info', `ℹ️  No active followers for trader ${traderName}`)
+        this.log('debug', `No followers for ${traderName}`)
         return
       }
 
-      this.log('info', `👥 Found ${subscriptions.length} active follower(s) for ${traderName}`)
+      // Followed trader - log detailed info
+      this.log('info', '━'.repeat(60))
+      this.log('info', `📊 Trade from followed trader: ${traderName}`)
+      this.log('info', `  Market: ${trade.title}`)
+      this.log('info', `  Side: ${trade.side} ${trade.outcome}`)
+      this.log('info', `  Price: $${trade.price.toFixed(4)} | Size: ${trade.size}`)
+      this.log('info', `  Value: $${(trade.price * trade.size).toFixed(2)}`)
+      this.log('info', `👥 Copying trade to ${subscriptions.length} follower(s)...`)
 
       let successCount = 0
       let failCount = 0
@@ -71,7 +65,8 @@ export class TradeOrchestrator {
         }
       }
 
-      this.log('info', `✅ Copy trading complete: ${successCount} succeeded, ${failCount} failed`)
+      this.log('info', `✅ Copy complete: ${successCount} succeeded${failCount > 0 ? `, ${failCount} failed` : ''}`)
+      this.log('info', '━'.repeat(60))
     } catch (error) {
       this.log('error', 'Error processing trade event:', error)
       throw error
