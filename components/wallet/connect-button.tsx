@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { signIn, signOut, useSession } from 'next-auth/react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useToast } from '@/hooks/use-toast'
+import { Copy } from 'lucide-react'
 
 export function ConnectButton() {
   const [mounted, setMounted] = useState(false)
@@ -102,6 +103,24 @@ export function ConnectButton() {
     }
   }, [address, connector, isSigning, signMessageAsync, toast])
 
+  const handleCopyAddress = async () => {
+    if (!address) return
+    try {
+      await navigator.clipboard.writeText(address)
+      toast({
+        title: "Copied",
+        description: "Address copied to clipboard",
+      })
+    } catch (error) {
+      console.error('Copy error:', error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to copy address",
+      })
+    }
+  }
+
   const handleDisconnect = async () => {
     try {
       signingAttemptedRef.current = false // Reset for next connection
@@ -161,8 +180,16 @@ export function ConnectButton() {
   if (session && address) {
     return (
       <div className="flex items-center gap-2">
-        <div className="text-sm">
-          {address.slice(0, 6)}...{address.slice(-4)}
+        <div className="flex items-center gap-1 text-sm">
+          <span>{address.slice(0, 6)}...{address.slice(-4)}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCopyAddress}
+            className="h-6 w-6 p-0 hover:bg-accent"
+          >
+            <Copy className="h-3 w-3" />
+          </Button>
         </div>
         <Button variant="outline" onClick={handleDisconnect}>
           Disconnect

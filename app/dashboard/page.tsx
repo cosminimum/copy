@@ -147,7 +147,7 @@ export default async function DashboardPage() {
               <CardTitle>Recent Trades</CardTitle>
               <CardDescription>Your latest copy trades</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="max-h-[400px] overflow-y-auto">
               {trades.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
                   No trades yet. Start following traders to see activity here.
@@ -184,7 +184,7 @@ export default async function DashboardPage() {
               <CardTitle>Active Positions</CardTitle>
               <CardDescription>Your current open positions</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="max-h-[400px] overflow-y-auto">
               {positions.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
                   No open positions
@@ -220,7 +220,7 @@ export default async function DashboardPage() {
             <CardTitle>Activity Feed</CardTitle>
             <CardDescription>Real-time updates from your copy trading activity</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="max-h-[400px] overflow-y-auto">
             {activityLogs.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-muted-foreground">

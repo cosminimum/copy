@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { Plus } from 'lucide-react'
+import { Plus, Copy } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,6 +64,23 @@ export function FollowingSection() {
   const handleUnfollowClick = (trader: Following) => {
     setTraderToUnfollow(trader)
     setShowConfirmDialog(true)
+  }
+
+  const handleCopyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address)
+      toast({
+        title: 'Copied',
+        description: 'Address copied to clipboard',
+      })
+    } catch (error) {
+      console.error('Error copying address:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to copy address',
+      })
+    }
   }
 
   const handleUnfollow = async () => {
@@ -190,10 +207,27 @@ export function FollowingSection() {
                     </Button>
                   </div>
                   <CardTitle className="text-base truncate">
-                    {item.trader.name || `${item.trader.walletAddress.slice(0, 6)}...${item.trader.walletAddress.slice(-4)}`}
+                    <a
+                      href={`https://polymarket.com/profile/${item.trader.walletAddress}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      {item.trader.name || `${item.trader.walletAddress.slice(0, 6)}...${item.trader.walletAddress.slice(-4)}`}
+                    </a>
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    {item.trader.walletAddress.slice(0, 8)}...{item.trader.walletAddress.slice(-6)}
+                  <CardDescription className="text-xs flex items-center gap-1">
+                    <span>
+                      {item.trader.walletAddress.slice(0, 8)}...{item.trader.walletAddress.slice(-6)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleCopyAddress(item.trader.walletAddress)}
+                      className="h-4 w-4 p-0 hover:bg-transparent"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
