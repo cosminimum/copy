@@ -121,6 +121,20 @@ export class PolymarketWebSocketService {
     console.log(`Active subscriptions: ${this.subscriptions.size}`)
   }
 
+  subscribeToAllTrades(): void {
+    const config: SubscriptionConfig = {
+      topic: 'activity',
+      type: 'trades',
+    }
+
+    const key = 'all-trades'
+    this.subscriptions.set(key, config)
+
+    if (this.isConnected && this.client) {
+      this.subscribeToConfig(config)
+    }
+  }
+
   subscribeToTrader(trader: TraderToFollow): void {
     // Build filters - always include wallet address
     const filterObj: Record<string, string> = {
