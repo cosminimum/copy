@@ -114,24 +114,33 @@ export class PolymarketWebSocketService {
       return
     }
 
+    console.log('Subscribing with config:', JSON.stringify(config, null, 2))
     this.client.subscribe({
       subscriptions: [config],
     })
+    console.log(`Active subscriptions: ${this.subscriptions.size}`)
   }
 
   subscribeToTrader(trader: TraderToFollow): void {
-    let filters = ''
-
-    if (trader.eventSlug) {
-      filters = `{"event_slug":"${trader.eventSlug}"}`
-    } else if (trader.marketSlug) {
-      filters = `{"market_slug":"${trader.marketSlug}"}`
+    // Build filters - always include wallet address
+    const filterObj: Record<string, string> = {
+      user: trader.walletAddress.toLowerCase()
     }
+
+    // Add optional filters
+    if (trader.eventSlug) {
+      filterObj.event_slug = trader.eventSlug
+    }
+    if (trader.marketSlug) {
+      filterObj.market_slug = trader.marketSlug
+    }
+
+    const filters = JSON.stringify(filterObj)
 
     const config: SubscriptionConfig = {
       topic: 'activity',
       type: 'trades',
-      filters: filters || undefined,
+      filters: filters,
     }
 
     const key = `${trader.walletAddress}-${trader.eventSlug || trader.marketSlug || 'all'}`

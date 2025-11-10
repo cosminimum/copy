@@ -53,35 +53,47 @@ function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...arg
 async function subscribeToFollowedTraders() {
   log('info', 'Fetching followed traders from active subscriptions...')
 
-  // Get unique wallet addresses from active subscriptions
-  const subscriptions = await prisma.subscription.findMany({
-    where: { isActive: true },
-    select: {
-      traderWalletAddress: true,
-      traderName: true,
-    },
-    distinct: ['traderWalletAddress'],
-  })
-
-  if (subscriptions.length === 0) {
-    log('warn', 'No active subscriptions found.')
-    log('info', 'Users need to follow traders from the Dashboard to start monitoring trades.')
-    return
-  }
-
-  log('info', `Found ${subscriptions.length} unique followed trader(s)`)
-
-  // Subscribe to each unique wallet address
-  for (const subscription of subscriptions) {
-    wsService.subscribeToTrader({
-      walletAddress: subscription.traderWalletAddress,
+  try {
+    // Get unique wallet addresses from active subscriptions
+    const subscriptions = await prisma.subscription.findMany({
+      where: { isActive: true },
+      select: {
+        traderWalletAddress: true,
+        traderName: true,
+      },
+      distinct: ['traderWalletAddress'],
     })
-    const displayName = subscription.traderName ||
-                       `${subscription.traderWalletAddress.slice(0, 6)}...${subscription.traderWalletAddress.slice(-4)}`
-    log('debug', `Subscribed to trader: ${displayName} (${subscription.traderWalletAddress})`)
-  }
 
-  log('info', `Successfully subscribed to ${subscriptions.length} trader(s)`)
+    log('info', `Database query completed. Found ${subscriptions.length} subscription(s)`)
+
+    if (subscriptions.length === 0) {
+      log('warn', 'No active subscriptions found in database.')
+      log('info', 'Users need to follow traders from the Dashboard to start monitoring trades.')
+
+      // Check if database is accessible
+      const totalUsers = await prisma.user.count()
+      log('info', `Database check: ${totalUsers} user(s) in database`)
+      return
+    }
+
+    log('info', `Found ${subscriptions.length} unique followed trader(s)`)
+
+    // Subscribe to each unique wallet address (normalized to lowercase)
+    for (const subscription of subscriptions) {
+      const normalizedWallet = subscription.traderWalletAddress.toLowerCase()
+      wsService.subscribeToTrader({
+        walletAddress: normalizedWallet,
+      })
+      const displayName = subscription.traderName ||
+                         `${normalizedWallet.slice(0, 6)}...${normalizedWallet.slice(-4)}`
+      log('info', `✓ Subscribed to trader: ${displayName} (${normalizedWallet})`)
+    }
+
+    log('info', `Successfully subscribed to ${subscriptions.length} trader(s)`)
+  } catch (error) {
+    log('error', 'Error fetching or subscribing to traders:', error)
+    throw error
+  }
 }
 
 // Handle incoming trades

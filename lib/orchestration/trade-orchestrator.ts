@@ -26,8 +26,11 @@ export class TradeOrchestrator {
     })
 
     try {
-      const traderWallet = trade.proxyWallet
+      // Normalize wallet address to lowercase for case-insensitive matching
+      const traderWallet = trade.proxyWallet.toLowerCase()
       const traderName = trade.name || trade.pseudonym || `${traderWallet.slice(0, 6)}...${traderWallet.slice(-4)}`
+
+      this.log('debug', `Looking up subscriptions for wallet: ${traderWallet}`)
 
       // Find active subscriptions for this wallet address (no Trader table lookup needed)
       const subscriptions = await prisma.subscription.findMany({
@@ -39,6 +42,8 @@ export class TradeOrchestrator {
           user: true,
         },
       })
+
+      this.log('debug', `Database returned ${subscriptions.length} subscription(s)`)
 
       if (subscriptions.length === 0) {
         this.log('info', `ℹ️  No active followers for trader ${traderName}`)
