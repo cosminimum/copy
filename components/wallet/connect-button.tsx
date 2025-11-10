@@ -59,7 +59,7 @@ export function ConnectButton() {
     setIsSigning(true)
 
     try {
-      const message = `Sign this message to authenticate with Polymarket Copy Trader.\n\nWallet: ${address}\nTimestamp: ${Date.now()}`
+      const message = `Sign this message to authenticate with Forecast Market.\n\nWallet: ${address}\nTimestamp: ${Date.now()}`
 
       const signature = await signMessageAsync({
         message,

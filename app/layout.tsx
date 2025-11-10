@@ -8,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Polymarket Copy Trader",
+  title: "Forecast Market",
   description: "Automated copy trading platform for Polymarket",
 }
 

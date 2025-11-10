@@ -17,7 +17,7 @@ export default async function DashboardPage() {
         <Navbar />
         <div className="container mx-auto px-4 py-8">
           <div className="text-center py-16">
-            <h1 className="text-3xl font-bold mb-4">Welcome to Polymarket Copy Trader</h1>
+            <h1 className="text-3xl font-bold mb-4">Welcome to Forecast Market</h1>
             <p className="text-muted-foreground mb-8">
               Connect your wallet to start following top traders and copying their trades automatically
             </p>
