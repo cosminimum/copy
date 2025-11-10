@@ -29,6 +29,7 @@ const CONFIG = {
   logLevel: (process.env.WEBSOCKET_LOG_LEVEL || 'info') as 'debug' | 'info' | 'warn' | 'error',
   reconnectDelay: 5000, // ms
   maxReconnectAttempts: 10,
+  subscriptionRefreshInterval: 1000, // Refresh subscriptions every 1 second
 }
 
 // Statistics
@@ -49,10 +50,11 @@ function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...arg
   }
 }
 
-// Subscribe to all followed traders (only those with active subscriptions)
-async function subscribeToFollowedTraders() {
-  log('info', 'Fetching followed traders from active subscriptions...')
+// Track currently subscribed traders
+let currentSubscriptions = new Set<string>()
 
+// Subscribe to all followed traders (only those with active subscriptions)
+async function syncSubscriptions() {
   try {
     // Get unique wallet addresses from active subscriptions
     const subscriptions = await prisma.subscription.findMany({
@@ -64,35 +66,45 @@ async function subscribeToFollowedTraders() {
       distinct: ['traderWalletAddress'],
     })
 
-    log('info', `Database query completed. Found ${subscriptions.length} subscription(s)`)
-
-    if (subscriptions.length === 0) {
-      log('warn', 'No active subscriptions found in database.')
-      log('info', 'Users need to follow traders from the Dashboard to start monitoring trades.')
-
-      // Check if database is accessible
-      const totalUsers = await prisma.user.count()
-      log('info', `Database check: ${totalUsers} user(s) in database`)
-      return
+    // Normalize all wallet addresses to lowercase
+    const newSubscriptions = new Map<string, string>() // wallet -> name
+    for (const sub of subscriptions) {
+      const normalizedWallet = sub.traderWalletAddress.toLowerCase()
+      newSubscriptions.set(normalizedWallet, sub.traderName || '')
     }
 
-    log('info', `Found ${subscriptions.length} unique followed trader(s)`)
+    // Find traders to unsubscribe (removed from database)
+    const toUnsubscribe = Array.from(currentSubscriptions).filter(
+      wallet => !newSubscriptions.has(wallet)
+    )
 
-    // Subscribe to each unique wallet address (normalized to lowercase)
-    for (const subscription of subscriptions) {
-      const normalizedWallet = subscription.traderWalletAddress.toLowerCase()
-      wsService.subscribeToTrader({
-        walletAddress: normalizedWallet,
-      })
-      const displayName = subscription.traderName ||
-                         `${normalizedWallet.slice(0, 6)}...${normalizedWallet.slice(-4)}`
-      log('info', `✓ Subscribed to trader: ${displayName} (${normalizedWallet})`)
+    // Find traders to subscribe (newly added to database)
+    const toSubscribe = Array.from(newSubscriptions.keys()).filter(
+      wallet => !currentSubscriptions.has(wallet)
+    )
+
+    // Unsubscribe from removed traders
+    for (const wallet of toUnsubscribe) {
+      wsService.unsubscribeFromTrader({ walletAddress: wallet })
+      currentSubscriptions.delete(wallet)
+      log('info', `✗ Unsubscribed from: ${wallet.slice(0, 6)}...${wallet.slice(-4)}`)
     }
 
-    log('info', `Successfully subscribed to ${subscriptions.length} trader(s)`)
+    // Subscribe to new traders
+    for (const wallet of toSubscribe) {
+      wsService.subscribeToTrader({ walletAddress: wallet })
+      currentSubscriptions.add(wallet)
+      const displayName = newSubscriptions.get(wallet) || `${wallet.slice(0, 6)}...${wallet.slice(-4)}`
+      log('info', `✓ Subscribed to: ${displayName} (${wallet})`)
+    }
+
+    // Log summary if there were changes
+    if (toSubscribe.length > 0 || toUnsubscribe.length > 0) {
+      log('info', `📊 Subscription sync: ${currentSubscriptions.size} total (${toSubscribe.length} added, ${toUnsubscribe.length} removed)`)
+    }
+
   } catch (error) {
-    log('error', 'Error fetching or subscribing to traders:', error)
-    throw error
+    log('error', 'Error syncing subscriptions:', error)
   }
 }
 
@@ -151,14 +163,19 @@ async function main() {
       // Reset reconnect attempts on successful connection
       reconnectAttempts = 0
 
-      // Subscribe to followed traders
-      await subscribeToFollowedTraders()
+      // Initial subscription sync
+      log('info', 'Performing initial subscription sync...')
+      await syncSubscriptions()
 
       // Register trade handler
       wsService.onTrade(handleTrade)
 
       log('info', '\n✓ Listener is now active and monitoring trades')
+      log('info', `  Subscriptions will refresh every ${CONFIG.subscriptionRefreshInterval / 1000}s`)
       log('info', '  Press Ctrl+C to stop\n')
+
+      // Refresh subscriptions periodically
+      setInterval(syncSubscriptions, CONFIG.subscriptionRefreshInterval)
 
       // Print stats every 5 minutes
       setInterval(printStats, 5 * 60 * 1000)
