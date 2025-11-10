@@ -36,6 +36,17 @@ export interface SearchResponse {
 }
 
 /**
+ * Raw profile response from Polymarket search API
+ */
+interface RawSearchProfile {
+  name: string
+  pseudonym: string
+  displayUsernamePublic: boolean
+  profileImage?: string | null
+  proxyWallet: string
+}
+
+/**
  * Search for trader profiles by name, pseudonym, or wallet address
  */
 export async function searchProfiles(query: string, limit: number = 10): Promise<PolymarketProfile[]> {
@@ -70,9 +81,23 @@ export async function searchProfiles(query: string, limit: number = 10): Promise
       return []
     }
 
-    const data: SearchResponse = await response.json()
+    const data: { profiles: RawSearchProfile[] | null } = await response.json()
 
-    return data.profiles || []
+    // Map raw API response to our PolymarketProfile interface
+    if (!data.profiles) {
+      return []
+    }
+
+    return data.profiles.map((profile) => ({
+      id: profile.proxyWallet,
+      name: profile.name || null,
+      pseudonym: profile.pseudonym || null,
+      bio: null,
+      profileImage: profile.profileImage || null,
+      proxyWallet: profile.proxyWallet,
+      walletActivated: true,
+      profileImageOptimized: null,
+    }))
   } catch (error) {
     console.error('Error searching Polymarket profiles:', error)
     return []
