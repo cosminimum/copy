@@ -102,38 +102,42 @@ export function FollowingSection() {
 
   if (loading) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Following</CardTitle>
-          <CardDescription>Traders you're copying</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-center text-muted-foreground py-4">Loading...</p>
-        </CardContent>
-      </Card>
+      <div>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">Following</h2>
+          <p className="text-muted-foreground">Traders you're copying</p>
+        </div>
+        <Card>
+          <CardContent className="py-8">
+            <p className="text-center text-muted-foreground">Loading...</p>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
   if (following.length === 0) {
     return (
       <>
-        <Card>
-          <CardHeader>
-            <CardTitle>Following</CardTitle>
-            <CardDescription>Traders you're copying</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-8">
-              <p className="text-muted-foreground mb-4">
-                You're not following any traders yet
-              </p>
-              <Button onClick={() => setShowAddDialog(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Trader
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div>
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold">Following</h2>
+            <p className="text-muted-foreground">Traders you're copying</p>
+          </div>
+          <Card>
+            <CardContent className="py-12">
+              <div className="text-center">
+                <p className="text-muted-foreground mb-4">
+                  You're not following any traders yet
+                </p>
+                <Button onClick={() => setShowAddDialog(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Trader
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
         <AddTraderDialog
           open={showAddDialog}
           onOpenChange={setShowAddDialog}
@@ -145,103 +149,128 @@ export function FollowingSection() {
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Following ({following.length})</CardTitle>
-              <CardDescription>Performance of traders you're copying</CardDescription>
-            </div>
-            <Button onClick={() => setShowAddDialog(true)} size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Trader
-            </Button>
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold">Following ({following.length})</h2>
+            <p className="text-muted-foreground">Traders you're copying</p>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {following.map((item) => (
-              <div
-                key={item.trader.walletAddress}
-                className="border rounded-lg p-4 hover:bg-accent/50 transition-colors"
-              >
-                <div className="flex items-start gap-4">
-                  <img
-                    src={item.trader.profileImage || `https://api.dicebear.com/7.x/identicon/svg?seed=${item.trader.walletAddress}`}
-                    alt={item.trader.name || 'Trader'}
-                    className="w-12 h-12 rounded-full flex-shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <h4 className="font-semibold truncate">
-                          {item.trader.name || `${item.trader.walletAddress.slice(0, 6)}...${item.trader.walletAddress.slice(-4)}`}
-                        </h4>
-                        <p className="text-xs text-muted-foreground">
-                          {item.trader.walletAddress.slice(0, 6)}...
-                          {item.trader.walletAddress.slice(-4)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {item.settings && (
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Multiplier</p>
-                            <p className="font-semibold">{item.settings.positionSizeValue}x</p>
-                          </div>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleUnfollowClick(item)}
-                          disabled={unfollowingWallet === item.trader.walletAddress}
-                        >
-                          {unfollowingWallet === item.trader.walletAddress ? 'Unfollowing...' : 'Unfollow'}
-                        </Button>
-                      </div>
-                    </div>
+          <Button onClick={() => setShowAddDialog(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Trader
+          </Button>
+        </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <p className="text-muted-foreground text-xs">Trades Copied</p>
-                        <p className="font-semibold">{item.performance.totalTrades}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground text-xs">Volume</p>
-                        <p className="font-semibold">
-                          ${item.performance.totalVolume.toLocaleString(undefined, {
-                            maximumFractionDigits: 0,
-                          })}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground text-xs">P&L</p>
-                        <p
-                          className={`font-semibold ${
-                            item.performance.totalPnL >= 0
-                              ? 'text-green-600'
-                              : 'text-red-600'
-                          }`}
-                        >
-                          {item.performance.totalPnL >= 0 ? '+' : ''}$
-                          {item.performance.totalPnL.toLocaleString(undefined, {
-                            maximumFractionDigits: 2,
-                          })}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground text-xs">Win Rate</p>
-                        <p className="font-semibold">
-                          {(item.performance.winRate * 100).toFixed(1)}%
-                        </p>
-                      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {following.map((item) => {
+            const avgTradeSize = item.performance.totalTrades > 0
+              ? item.performance.totalVolume / item.performance.totalTrades
+              : 0
+            const successRate = item.performance.totalTrades > 0
+              ? (item.performance.winRate * 100).toFixed(1)
+              : '0.0'
+
+            return (
+              <Card key={item.trader.walletAddress} className="hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between mb-3">
+                    <img
+                      src={item.trader.profileImage || `https://api.dicebear.com/7.x/identicon/svg?seed=${item.trader.walletAddress}`}
+                      alt={item.trader.name || 'Trader'}
+                      className="w-12 h-12 rounded-full"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleUnfollowClick(item)}
+                      disabled={unfollowingWallet === item.trader.walletAddress}
+                      className="h-8 px-2 text-xs"
+                    >
+                      {unfollowingWallet === item.trader.walletAddress ? 'Unfollowing...' : 'Unfollow'}
+                    </Button>
+                  </div>
+                  <CardTitle className="text-base truncate">
+                    {item.trader.name || `${item.trader.walletAddress.slice(0, 6)}...${item.trader.walletAddress.slice(-4)}`}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    {item.trader.walletAddress.slice(0, 8)}...{item.trader.walletAddress.slice(-6)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {/* P&L - Most Important Metric */}
+                  <div className="bg-accent/50 rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground mb-1">Total P&L</p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        item.performance.totalPnL >= 0
+                          ? 'text-green-600'
+                          : 'text-red-600'
+                      }`}
+                    >
+                      {item.performance.totalPnL >= 0 ? '+' : ''}$
+                      {item.performance.totalPnL.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </div>
+
+                  {/* Key Stats Grid */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Trades</p>
+                      <p className="font-semibold">{item.performance.totalTrades}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Win Rate</p>
+                      <p className="font-semibold">{successRate}%</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Volume</p>
+                      <p className="font-semibold text-sm">
+                        ${item.performance.totalVolume.toLocaleString(undefined, {
+                          maximumFractionDigits: 0,
+                        })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Avg Trade</p>
+                      <p className="font-semibold text-sm">
+                        ${avgTradeSize.toLocaleString(undefined, {
+                          maximumFractionDigits: 0,
+                        })}
+                      </p>
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+
+                  {/* Copy Settings */}
+                  {item.settings && (
+                    <div className="border-t pt-3">
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <p className="text-muted-foreground">Multiplier</p>
+                          <p className="font-semibold">{item.settings.positionSizeValue}x</p>
+                        </div>
+                        {item.settings.maxPositionSize && (
+                          <div>
+                            <p className="text-muted-foreground">Max Size</p>
+                            <p className="font-semibold">${item.settings.maxPositionSize}</p>
+                          </div>
+                        )}
+                        {item.settings.minTradeSize && (
+                          <div>
+                            <p className="text-muted-foreground">Min Size</p>
+                            <p className="font-semibold">${item.settings.minTradeSize}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      </div>
 
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <AlertDialogContent>

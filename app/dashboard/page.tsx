@@ -1,8 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Navbar } from '@/components/layout/navbar'
 import { FollowingSection } from '@/components/dashboard/following-section'
-import { TraderPerformance } from '@/components/dashboard/trader-performance'
 import { WebSocketStatus } from '@/components/dashboard/websocket-status'
+import { PortfolioChart } from '@/components/dashboard/portfolio-chart'
 import { auth } from '@/lib/auth/auth'
 import prisma from '@/lib/db/prisma'
 
@@ -27,7 +27,7 @@ export default async function DashboardPage() {
     )
   }
 
-  const [subscriptions, trades, positions, activityLogs] = await Promise.all([
+  const [subscriptions, trades, positions, activityLogs, portfolioSnapshots] = await Promise.all([
     prisma.subscription.findMany({
       where: {
         userId: session.user.id,
@@ -58,61 +58,29 @@ export default async function DashboardPage() {
       },
       take: 20,
     }),
+    prisma.portfolioSnapshot.findMany({
+      where: {
+        userId: session.user.id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 30, // Last 30 snapshots for the chart
+    }),
   ])
 
-  // Calculate trader performance
-  const traderPerformance = await Promise.all(
-    subscriptions.map(async (sub) => {
-      const traderTrades = await prisma.trade.findMany({
-        where: {
-          userId: session.user.id,
-          traderWalletAddress: sub.traderWalletAddress,
-        },
-      })
-
-      const successfulTrades = traderTrades.filter(t => t.status === 'COMPLETED').length
-      const totalVolume = traderTrades.reduce((sum, t) => sum + t.value, 0)
-
-      // Calculate PnL for this trader's trades
-      const traderPositions = await prisma.position.findMany({
-        where: {
-          userId: session.user.id,
-        },
-      })
-
-      // Simple PnL calculation based on positions
-      const totalPnL = traderPositions.reduce((sum, p) => {
-        return sum + p.unrealizedPnL + p.realizedPnL
-      }, 0)
-
-      return {
-        trader: {
-          walletAddress: sub.traderWalletAddress,
-          name: sub.traderName,
-          profileImage: sub.traderProfileImage,
-        },
-        totalTrades: traderTrades.length,
-        successfulTrades,
-        totalPnL: totalPnL / subscriptions.length, // Rough attribution
-        totalVolume,
-        avgTradeSize: traderTrades.length > 0 ? totalVolume / traderTrades.length : 0,
-      }
-    })
-  )
 
   const totalTrades = trades.length
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayTrades = trades.filter(t => t.timestamp >= todayStart).length
 
-  const completedTrades = trades.filter(t => t.status === 'COMPLETED')
-  const totalPnL = completedTrades.reduce((sum, t) => {
-    const position = positions.find(p => p.market === t.market && p.asset === t.asset)
-    return sum + (position?.realizedPnL || 0)
-  }, 0)
-
-  const portfolioValue = 10000 + totalPnL
-  const todayPnLPercent = portfolioValue > 0 ? ((totalPnL / portfolioValue) * 100).toFixed(2) : 0
+  // Get latest portfolio snapshot or calculate from positions
+  const latestSnapshot = portfolioSnapshots[0]
+  const portfolioValue = latestSnapshot?.totalValue || 0
+  const totalPnL = latestSnapshot?.totalPnL || positions.reduce((sum, p) => sum + p.unrealizedPnL + p.realizedPnL, 0)
+  const dailyPnL = latestSnapshot?.dailyPnL || 0
+  const todayPnLPercent = portfolioValue > 0 ? ((dailyPnL / portfolioValue) * 100).toFixed(2) : '0.00'
 
   return (
     <div className="min-h-screen bg-background">
@@ -130,8 +98,8 @@ export default async function DashboardPage() {
               <CardTitle className="text-2xl">${portfolioValue.toFixed(2)}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className={`text-xs ${totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {totalPnL >= 0 ? '+' : ''}{todayPnLPercent}% today
+              <div className={`text-xs ${dailyPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {dailyPnL >= 0 ? '+' : ''}{todayPnLPercent}% today
               </div>
             </CardContent>
           </Card>
@@ -172,12 +140,6 @@ export default async function DashboardPage() {
         <div className="mb-8">
           <FollowingSection />
         </div>
-
-        {subscriptions.length > 0 && (
-          <div className="mb-8">
-            <TraderPerformance data={traderPerformance} />
-          </div>
-        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
           <Card>

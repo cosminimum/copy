@@ -8,20 +8,12 @@ export function Navbar() {
     <nav className="border-b">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="text-xl font-bold">
-              Polymarket Copy Trader
-            </Link>
-            <div className="flex gap-4">
-              <Link href="/dashboard" className="text-sm hover:text-primary">
-                Dashboard
-              </Link>
-              <Link href="/settings" className="text-sm hover:text-primary">
-                Settings
-              </Link>
-            </div>
+          <Link href="/" className="text-2xl font-bold text-primary hover:opacity-80 transition-opacity">
+            FORECAST MARKET
+          </Link>
+          <div className="flex items-center gap-4">
+            <ConnectButton />
           </div>
-          <ConnectButton />
         </div>
       </div>
     </nav>

@@ -3,12 +3,13 @@
 import { useAccount, useConnect, useDisconnect, useSignMessage, useConnectorClient } from 'wagmi'
 import { Button } from '@/components/ui/button'
 import { signIn, signOut, useSession } from 'next-auth/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useToast } from '@/hooks/use-toast'
 
 export function ConnectButton() {
   const [mounted, setMounted] = useState(false)
   const [isSigning, setIsSigning] = useState(false)
+  const signingAttemptedRef = useRef(false)
   const { address, isConnected, connector } = useAccount()
   const { connect, connectors } = useConnect()
   const { disconnect } = useDisconnect()
@@ -23,6 +24,7 @@ export function ConnectButton() {
 
   const handleConnect = async (connectorIndex: number) => {
     try {
+      signingAttemptedRef.current = false // Reset the flag for new connection
       await connect({ connector: connectors[connectorIndex] })
     } catch (error: any) {
       console.error('Connection error:', error)
@@ -34,14 +36,25 @@ export function ConnectButton() {
     }
   }
 
-  const handleSignIn = async () => {
-    if (!address) return
-    if (isSigning) return
+  const handleSignIn = useCallback(async () => {
+    if (!address) {
+      console.log('No address available')
+      return
+    }
+    if (isSigning) {
+      console.log('Already signing')
+      return
+    }
     if (!connector) {
       console.error('No connector available')
       return
     }
+    if (signingAttemptedRef.current) {
+      console.log('Signing already attempted')
+      return
+    }
 
+    signingAttemptedRef.current = true
     setIsSigning(true)
 
     try {
@@ -69,6 +82,7 @@ export function ConnectButton() {
       })
     } catch (error: any) {
       console.error('Sign in error:', error)
+      signingAttemptedRef.current = false // Reset on error so user can retry
 
       let errorMessage = "Failed to sign message. Please try again."
 
@@ -86,10 +100,11 @@ export function ConnectButton() {
     } finally {
       setIsSigning(false)
     }
-  }
+  }, [address, connector, isSigning, signMessageAsync, toast])
 
   const handleDisconnect = async () => {
     try {
+      signingAttemptedRef.current = false // Reset for next connection
       await signOut()
       disconnect()
       toast({
@@ -102,17 +117,36 @@ export function ConnectButton() {
   }
 
   useEffect(() => {
-    // Only auto-sign if:
-    // 1. Component is mounted
-    // 2. Wallet is connected
-    // 3. Has address
-    // 4. No existing session
-    // 5. Not already signing
-    // 6. Connector client is ready (prevents "getChainId is not a function" error)
-    if (mounted && isConnected && address && !session && !isSigning && connectorClient) {
-      handleSignIn()
+    // Debug logging
+    console.log('useEffect check:', {
+      mounted,
+      isConnected,
+      hasAddress: !!address,
+      hasSession: !!session,
+      isSigning,
+      hasConnectorClient: !!connectorClient,
+      signingAttempted: signingAttemptedRef.current
+    })
+
+    // Only auto-sign if all conditions are met
+    if (mounted && isConnected && address && !session && !isSigning) {
+      // If connectorClient is ready, sign immediately
+      if (connectorClient) {
+        console.log('Triggering auto-sign from useEffect (with connectorClient)')
+        handleSignIn()
+      } else {
+        // Otherwise, wait a bit for it to be ready
+        console.log('ConnectorClient not ready, waiting...')
+        const timeout = setTimeout(() => {
+          if (!signingAttemptedRef.current) {
+            console.log('Triggering auto-sign after timeout')
+            handleSignIn()
+          }
+        }, 1000)
+        return () => clearTimeout(timeout)
+      }
     }
-  }, [mounted, isConnected, address, session, connectorClient])
+  }, [mounted, isConnected, address, session, connectorClient, isSigning, handleSignIn])
 
   if (!mounted) {
     return (
@@ -139,11 +173,11 @@ export function ConnectButton() {
 
   if (isConnected && !session) {
     return (
-      <div className="flex gap-2">
-        <Button onClick={handleSignIn} disabled={isSigning}>
-          {isSigning ? 'Signing...' : 'Sign Message'}
+      <div className="flex items-center gap-2">
+        <Button disabled>
+          {isSigning ? 'Signing Message...' : 'Authenticating...'}
         </Button>
-        <Button variant="outline" onClick={handleDisconnect} disabled={isSigning}>
+        <Button variant="outline" onClick={handleDisconnect} disabled={isSigning} size="sm">
           Cancel
         </Button>
       </div>

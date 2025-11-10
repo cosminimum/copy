@@ -181,7 +181,8 @@ export class TradeOrchestrator {
           value: calculatedTrade.value,
           fee: executionResult.gasFee || 0,
           transactionHash: executionResult.transactionHash,
-          status: executionResult.success ? 'COMPLETED' : 'FAILED',
+          // PENDING: waiting for transaction confirmation, FAILED: transaction failed
+          status: executionResult.success ? 'PENDING' : 'FAILED',
           executionType: 'COPY',
           errorMessage: executionResult.error,
           timestamp: executionResult.executedAt,

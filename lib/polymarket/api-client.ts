@@ -60,13 +60,16 @@ export async function searchProfiles(query: string, limit: number = 10): Promise
     }
 
     // Otherwise use the public search API
+    // Note: public-search endpoint is only available on gamma-api, not clob
     const params = new URLSearchParams({
       q: trimmedQuery,
       search_profiles: 'true',
       limit_per_type: limit.toString(),
     })
 
-    const response = await fetch(`${POLYMARKET_API_URL}/public-search?${params}`, {
+    const url = `https://gamma-api.polymarket.com/public-search?${params}`
+
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
