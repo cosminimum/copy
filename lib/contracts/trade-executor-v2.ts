@@ -99,7 +99,7 @@ export class TradeExecutorV2 {
         console.log('[TradeExecutorV2] ✅ CLOB balance updated');
 
         // Verify what CLOB actually knows about this Safe
-        const { getCLOBBalance } = await import('../polymarket/signature-type2-signer.js');
+        const { getCLOBBalance } = await import('../polymarket/signature-type2-signer');
         const clobBalance = await getCLOBBalance(
           operatorWallet.privateKey,
           credentials,

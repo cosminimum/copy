@@ -40,13 +40,13 @@ async function main() {
       console.log()
       console.log(`   Risk Limits:`)
       console.log(`     Max Position Size: ${setting.maxPositionSize || 'Unlimited'}`)
-      console.log(`     Max Total Exposure: ${setting.maxTotalExposure || 'Unlimited'}`)
+      console.log(`     Stop Loss: ${setting.stopLossPercentage ? setting.stopLossPercentage + '%' : 'None'}`)
+      console.log(`     Take Profit: ${setting.takeProfitPercentage ? setting.takeProfitPercentage + '%' : 'None'}`)
+      console.log(`     Max Daily Loss: ${setting.maxDailyLoss ? '$' + setting.maxDailyLoss : 'None'}`)
       console.log()
       console.log(`   Trade Filters:`)
       console.log(`     Min Trade Size: ${setting.minTradeSize || 'None'}`)
-      console.log(`     Max Trade Size: ${setting.maxTradeSize || 'None'}`)
-      console.log(`     Min Odds: ${setting.minOdds || 'None'}`)
-      console.log(`     Max Odds: ${setting.maxOdds || 'None'}`)
+      console.log(`     Max Concurrent Trades: ${setting.maxConcurrentTrades || 'Unlimited'}`)
     }
 
     // Check current positions
