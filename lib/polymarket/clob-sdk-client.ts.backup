@@ -1,0 +1,538 @@
+/**
+ * Polymarket CLOB SDK Client
+ *
+ * Official SDK wrapper for interacting with Polymarket's Central Limit Order Book
+ * Uses @polymarket/clob-client for proper order execution
+ *
+ * EIP-1271 Safe Integration:
+ * - Uses SafeEIP1271Signer for contract-based signatures
+ * - SignatureType = 3 (POLY_1271) for EIP-1271 validation
+ * - maker = signer = Safe address (preserves custody)
+ * - USDC stays in Safe, not operator wallet
+ */
+
+import { ClobClient, OrderType, Side, ApiKeyCreds } from '@polymarket/clob-client'
+import { ethers } from 'ethers'
+import { SafeEIP1271Signer } from './safe-eip1271-signer'
+
+const CLOB_HOST = process.env.POLYMARKET_API_URL || 'https://clob.polymarket.com'
+const POLYGON_CHAIN_ID = 137
+const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/demo'
+
+// SignatureType enum (matches Polymarket's Solidity contract)
+const SignatureType = {
+  EOA: 0,              // ECDSA EIP712 signatures signed by EOAs
+  POLY_PROXY: 1,       // EIP712 signatures signed by EOAs that own Polymarket Proxy wallets
+  POLY_GNOSIS_SAFE: 2, // EIP712 signatures signed by EOAs that own Polymarket Gnosis safes
+  POLY_1271: 3,        // EIP1271 signatures signed by smart contracts
+} as const
+
+/**
+ * Ethers v5 compatible wallet for Polymarket SDK
+ *
+ * The Polymarket CLOB SDK requires ethers v5.x and expects the experimental
+ * _signTypedData method (with underscore). Ethers v6 renamed this to signTypedData
+ * (without underscore) as it's now stable.
+ *
+ * This wrapper bridges the compatibility gap by adding the v5 method signature.
+ */
+class EthersV5CompatibleWallet extends ethers.Wallet {
+  /**
+   * Add v5 compatibility method for Polymarket SDK
+   * The SDK calls _signTypedData (v5 style) but we have signTypedData (v6 style)
+   */
+  async _signTypedData(
+    domain: ethers.TypedDataDomain,
+    types: Record<string, ethers.TypedDataField[]>,
+    value: Record<string, any>
+  ): Promise<string> {
+    // Delegate to v6's signTypedData method
+    return this.signTypedData(domain, types, value)
+  }
+}
+
+export interface OrderRequest {
+  tokenId: string
+  price: number
+  side: 'BUY' | 'SELL'
+  size: number
+}
+
+export interface OrderResponse {
+  success: boolean
+  orderId?: string
+  transactionHash?: string
+  error?: string
+  errorCode?: string
+}
+
+export class PolymarketClobSDK {
+  private clients: Map<string, ClobClient> = new Map()
+  private apiKeyCreds: Map<string, ApiKeyCreds> = new Map()
+  private safeSigners: Map<string, SafeEIP1271Signer> = new Map()
+  private provider: ethers.Provider | null = null
+
+  constructor() {
+    // Initialize provider for Safe operations
+    try {
+      this.provider = new ethers.JsonRpcProvider(POLYGON_RPC_URL)
+      console.log('[ClobSDK] Provider initialized for Safe EIP-1271 signing')
+    } catch (error) {
+      console.error('[ClobSDK] Failed to initialize provider:', error)
+    }
+  }
+
+  /**
+   * Get or create a Safe EIP-1271 signer for a specific Safe address
+   */
+  private async getSafeSigner(safeAddress: string): Promise<SafeEIP1271Signer | null> {
+    try {
+      const operatorKey = process.env.OPERATOR_PRIVATE_KEY
+      if (!operatorKey || operatorKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+        console.error('[ClobSDK] OPERATOR_PRIVATE_KEY not configured')
+        return null
+      }
+
+      if (!this.provider) {
+        console.error('[ClobSDK] Provider not initialized')
+        return null
+      }
+
+      const cacheKey = safeAddress.toLowerCase()
+
+      // Check if we already have a signer for this Safe
+      if (this.safeSigners.has(cacheKey)) {
+        const signer = this.safeSigners.get(cacheKey)!
+        if (signer.isInitialized()) {
+          return signer
+        }
+      }
+
+      // Create new Safe signer
+      console.log('[ClobSDK] Creating Safe EIP-1271 signer...')
+      const safeSigner = new SafeEIP1271Signer(operatorKey, safeAddress)
+
+      // Initialize with provider
+      await safeSigner.initializeSafe(this.provider)
+
+      // Cache the signer
+      this.safeSigners.set(cacheKey, safeSigner)
+
+      console.log('[ClobSDK] Safe signer created and initialized')
+      return safeSigner
+    } catch (error: any) {
+      console.error('[ClobSDK] Error creating Safe signer:', error)
+      return null
+    }
+  }
+
+  /**
+   * Get operator wallet for API authentication
+   * API keys must be derived with EOA signatures, not EIP-1271
+   *
+   * NOTE: Uses EthersV5CompatibleWallet to bridge ethers v6 → v5
+   * The Polymarket SDK expects v5's _signTypedData method (with underscore)
+   * but ethers v6 only has signTypedData (without underscore)
+   */
+  private async getOperatorWallet(): Promise<ethers.Wallet | null> {
+    const operatorKey = process.env.OPERATOR_PRIVATE_KEY
+    if (!operatorKey || operatorKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      console.error('[ClobSDK] OPERATOR_PRIVATE_KEY not configured')
+      return null
+    }
+
+    if (!this.provider) {
+      console.error('[ClobSDK] Provider not initialized')
+      return null
+    }
+
+    try {
+      // Ensure provider is ready before creating wallet
+      const network = await this.provider.getNetwork()
+      console.log('[ClobSDK] Provider connected to network:', {
+        name: network.name,
+        chainId: network.chainId.toString()
+      })
+
+      if (network.chainId !== BigInt(POLYGON_CHAIN_ID)) {
+        console.error(`[ClobSDK] Wrong network! Expected Polygon (${POLYGON_CHAIN_ID}), got ${network.chainId}`)
+        return null
+      }
+
+      // Use v5-compatible wallet to provide _signTypedData method
+      return new EthersV5CompatibleWallet(operatorKey, this.provider)
+    } catch (error: any) {
+      console.error('[ClobSDK] Error initializing operator wallet:', error.message)
+      return null
+    }
+  }
+
+  /**
+   * Get or create a CLOB client for a specific Safe address
+   *
+   * Important: API authentication uses operator's EOA signature
+   * Order signing uses Safe's EIP-1271 contract signature
+   */
+  private async getClobClient(safeAddress: string): Promise<ClobClient | null> {
+    try {
+      // Check if we already have a client for this Safe
+      const cacheKey = safeAddress.toLowerCase()
+      if (this.clients.has(cacheKey)) {
+        return this.clients.get(cacheKey)!
+      }
+
+      // Get operator wallet for API authentication
+      const operatorWallet = await this.getOperatorWallet()
+      if (!operatorWallet) {
+        console.error('[ClobSDK] Failed to get operator wallet')
+        return null
+      }
+
+      // Get Safe signer for order signing
+      const safeSigner = await this.getSafeSigner(safeAddress)
+      if (!safeSigner) {
+        console.error('[ClobSDK] Failed to get Safe signer')
+        return null
+      }
+
+      // Create or derive API key credentials
+      // IMPORTANT: Use operator's EOA for API authentication
+      // Polymarket API authentication requires direct EOA signatures, not EIP-1271
+      let apiKeyCreds: ApiKeyCreds
+
+      const operatorCacheKey = `operator-${await operatorWallet.getAddress()}`.toLowerCase()
+
+      if (this.apiKeyCreds.has(operatorCacheKey)) {
+        apiKeyCreds = this.apiKeyCreds.get(operatorCacheKey)!
+        console.log('[ClobSDK] Using cached API key for operator')
+      } else {
+        // Create a temporary client with OPERATOR wallet to derive API key
+        // API authentication requires EOA signatures
+        console.log('[ClobSDK] Creating temporary client for API key derivation...')
+        console.log('[ClobSDK]   Operator address:', await operatorWallet.getAddress())
+        console.log('[ClobSDK]   CLOB host:', CLOB_HOST)
+        console.log('[ClobSDK]   Chain ID:', POLYGON_CHAIN_ID)
+
+        const tempClient = new ClobClient(
+          CLOB_HOST,
+          POLYGON_CHAIN_ID,
+          operatorWallet as any, // Use operator EOA for API auth
+          undefined, // no creds yet
+          undefined, // no signature type
+          undefined, // no funder
+          undefined, // no geo token
+          true // useServerTime: prevent timestamp mismatch rejections
+        )
+
+        console.log('[ClobSDK] Deriving API key with operator EOA...')
+
+        try {
+          // Use deriveApiKey directly - operator already has API keys from Polymarket.com
+          // The createApiKey endpoint fails with 400 if keys already exist
+          apiKeyCreds = await tempClient.deriveApiKey()
+
+          // Validate the returned API key credentials
+          // Note: SDK returns 'key' (not 'apiKey') and 'passphrase' (not 'passPhrase')
+          if (!apiKeyCreds || !apiKeyCreds.key || !apiKeyCreds.passphrase) {
+            console.error('[ClobSDK] ❌ API key derivation returned invalid credentials')
+            console.error('[ClobSDK]   API Key:', apiKeyCreds?.key || 'undefined')
+            console.error('[ClobSDK]   Secret:', apiKeyCreds?.secret || 'undefined')
+            console.error('[ClobSDK]   Passphrase:', apiKeyCreds?.passphrase || 'undefined')
+            throw new Error(
+              'API key derivation failed: Invalid credentials returned. ' +
+              'Ensure the operator wallet has been connected to Polymarket.com at least once.'
+            )
+          }
+
+          console.log('[ClobSDK] ✅ API key derived successfully')
+          console.log('[ClobSDK]   API Key:', apiKeyCreds.key.substring(0, 20) + '...')
+          console.log('[ClobSDK]   Secret:', apiKeyCreds.secret ? '***hidden***' : 'present')
+          console.log('[ClobSDK]   Passphrase:', '***hidden***')
+        } catch (error: any) {
+          console.error('[ClobSDK] ❌ API key derivation failed')
+          console.error('[ClobSDK]   Error type:', error.constructor.name)
+          console.error('[ClobSDK]   Error message:', error.message)
+
+          // Re-throw with more context
+          if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+            throw new Error(
+              `API Authentication failed: ${error.message}. ` +
+              'Check that OPERATOR_PRIVATE_KEY is valid and funded with POL on Polygon.'
+            )
+          }
+          throw error
+        }
+
+        this.apiKeyCreds.set(operatorCacheKey, apiKeyCreds)
+        console.log('[ClobSDK] API key cached for operator')
+      }
+
+      // Create the actual client with API credentials
+      // IMPORTANT: Hybrid authentication setup:
+      // - Signer: Operator wallet (for L2 API authentication - address must match API keys)
+      // - getSigner: Returns Safe signer (for order signing via EIP-1271)
+      // - signatureType: 3 (POLY_1271) tells SDK to use EIP-1271 verification
+      // - funderAddress: Safe address (Safe holds USDC)
+      const clobClient = new ClobClient(
+        CLOB_HOST,
+        POLYGON_CHAIN_ID,
+        operatorWallet as any, // Operator for L2 auth (address matches API keys)
+        apiKeyCreds, // Operator's API credentials
+        SignatureType.POLY_1271, // Use EIP-1271 for order verification
+        safeAddress, // Safe holds USDC
+        undefined, // no geo token
+        true, // useServerTime
+        undefined, // no builder config
+        () => safeSigner // getSigner: provides Safe signer for order signing
+      )
+
+      this.clients.set(cacheKey, clobClient)
+      console.log(`[ClobSDK] Client created with hybrid authentication:`)
+      console.log(`[ClobSDK]   API Auth: Operator EOA`)
+      console.log(`[ClobSDK]   Order Signing: Safe EIP-1271`)
+      console.log(`[ClobSDK]   Safe: ${safeAddress}`)
+      console.log(`[ClobSDK]   Signature Type: ${SignatureType.POLY_1271} (POLY_1271)`)
+      console.log(`[ClobSDK]   Custody: USDC remains in Safe`)
+
+      return clobClient
+    } catch (error: any) {
+      console.error('[ClobSDK] Error creating CLOB client:', error)
+      return null
+    }
+  }
+
+  /**
+   * Execute a market order (Fill-Or-Kill)
+   * This immediately matches against the order book or fails
+   */
+  async executeMarketOrder(
+    safeAddress: string,
+    tokenId: string,
+    side: 'BUY' | 'SELL',
+    sizeInShares: number
+  ): Promise<OrderResponse> {
+    try {
+      const client = await this.getClobClient(safeAddress)
+      if (!client) {
+        return {
+          success: false,
+          errorCode: 'CLIENT_INIT_FAILED',
+          error: 'Failed to initialize CLOB client',
+        }
+      }
+
+      console.log(`[ClobSDK] Executing FOK order:`, {
+        safeAddress,
+        tokenId,
+        side,
+        size: sizeInShares,
+      })
+
+      // Get market info to determine tick size
+      const marketInfo = await this.getMarketInfo(tokenId)
+      if (!marketInfo) {
+        return {
+          success: false,
+          errorCode: 'MARKET_INFO_FAILED',
+          error: 'Failed to fetch market information',
+        }
+      }
+
+      // Create FOK (Fill-Or-Kill) order
+      // Price doesn't matter much for FOK as it matches immediately
+      // Set aggressive price to ensure immediate fill:
+      // - For BUY: use high price (0.99)
+      // - For SELL: use low price (0.01)
+      const price = side === 'BUY' ? 0.99 : 0.01
+
+      const orderResponse = await client.createAndPostOrder(
+        {
+          tokenID: tokenId,
+          price: price,
+          side: side === 'BUY' ? Side.BUY : Side.SELL,
+          size: sizeInShares,
+        },
+        {
+          tickSize: marketInfo.tickSize,
+          negRisk: marketInfo.negRisk,
+        },
+        OrderType.FOK // Fill-Or-Kill: execute immediately or fail
+      )
+
+      console.log('[ClobSDK] Order response:', orderResponse)
+
+      // Check if order was filled
+      if (orderResponse.success && orderResponse.orderID) {
+        return {
+          success: true,
+          orderId: orderResponse.orderID,
+          transactionHash: orderResponse.transactionsHashes?.[0], // May be undefined initially
+        }
+      } else {
+        // Check for authentication errors in response
+        const errorMsg = orderResponse.errorMsg || orderResponse.error || ''
+
+        // Detect authentication/authorization errors
+        if (
+          errorMsg.includes('401') ||
+          errorMsg.includes('Unauthorized') ||
+          errorMsg.includes('Invalid api key') ||
+          errorMsg.includes('403') ||
+          errorMsg.includes('Forbidden')
+        ) {
+          console.error('[ClobSDK] Authentication error detected in order response:', errorMsg)
+
+          // Clear cached credentials to force re-derivation on next attempt
+          const operatorAddress = await (await this.getOperatorWallet())?.getAddress()
+          if (operatorAddress) {
+            const operatorCacheKey = `operator-${operatorAddress}`.toLowerCase()
+            this.apiKeyCreds.delete(operatorCacheKey)
+            this.clients.delete(safeAddress.toLowerCase())
+            console.log('[ClobSDK] Cleared cached credentials due to auth error')
+          }
+
+          return {
+            success: false,
+            errorCode: 'AUTH_FAILED',
+            error: `Authentication error: ${errorMsg}`,
+          }
+        }
+
+        // Regular order execution failure (liquidity, market closed, etc.)
+        return {
+          success: false,
+          errorCode: 'ORDER_NOT_FILLED',
+          error: errorMsg || 'Order was not filled (insufficient liquidity or market closed)',
+        }
+      }
+    } catch (error: any) {
+      console.error('[ClobSDK] executeMarketOrder error:', error)
+      return {
+        success: false,
+        errorCode: 'EXECUTION_ERROR',
+        error: error.message || 'Unknown error during order execution',
+      }
+    }
+  }
+
+  /**
+   * Get market information (tick size, neg risk flag)
+   */
+  private async getMarketInfo(
+    tokenId: string
+  ): Promise<{ tickSize: string; negRisk: boolean } | null> {
+    try {
+      // Fetch from the book endpoint to get tick size
+      const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`)
+      if (!response.ok) {
+        console.error(`[ClobSDK] Failed to fetch market info: ${response.status}`)
+        return null
+      }
+
+      const data = await response.json()
+      return {
+        tickSize: data.tick_size || '0.01',
+        negRisk: data.neg_risk || false,
+      }
+    } catch (error: any) {
+      console.error('[ClobSDK] Error fetching market info:', error)
+      return null
+    }
+  }
+
+  /**
+   * Get order book for display/analysis
+   */
+  async getOrderBook(tokenId: string): Promise<any | null> {
+    try {
+      const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`)
+      if (!response.ok) {
+        return null
+      }
+      return await response.json()
+    } catch (error: any) {
+      console.error('[ClobSDK] Error fetching order book:', error)
+      return null
+    }
+  }
+
+  /**
+   * Check if there's sufficient liquidity for a trade
+   */
+  async checkLiquidity(
+    tokenId: string,
+    side: 'BUY' | 'SELL',
+    sizeInUSDC: number
+  ): Promise<{ hasLiquidity: boolean; availableSize: number }> {
+    try {
+      const orderBook = await this.getOrderBook(tokenId)
+      if (!orderBook) {
+        return { hasLiquidity: false, availableSize: 0 }
+      }
+
+      const orders = side === 'BUY' ? orderBook.asks : orderBook.bids
+      if (!orders || orders.length === 0) {
+        return { hasLiquidity: false, availableSize: 0 }
+      }
+
+      // Calculate total available liquidity
+      let totalValue = 0
+      for (const order of orders) {
+        const price = parseFloat(order.price)
+        const size = parseFloat(order.size)
+        totalValue += price * size
+
+        if (totalValue >= sizeInUSDC) {
+          return { hasLiquidity: true, availableSize: totalValue }
+        }
+      }
+
+      return {
+        hasLiquidity: totalValue >= sizeInUSDC * 0.9, // Allow 10% slippage
+        availableSize: totalValue,
+      }
+    } catch (error: any) {
+      console.error('[ClobSDK] Error checking liquidity:', error)
+      return { hasLiquidity: false, availableSize: 0 }
+    }
+  }
+
+  /**
+   * Convert USDC value to share size at current market price
+   */
+  async calculateShareSize(
+    tokenId: string,
+    side: 'BUY' | 'SELL',
+    valueInUSDC: number
+  ): Promise<number | null> {
+    try {
+      const orderBook = await this.getOrderBook(tokenId)
+      if (!orderBook) {
+        return null
+      }
+
+      // Get best price
+      const orders = side === 'BUY' ? orderBook.asks : orderBook.bids
+      if (!orders || orders.length === 0) {
+        return null
+      }
+
+      const bestPrice = parseFloat(orders[0].price)
+      if (bestPrice <= 0) {
+        return null
+      }
+
+      // Calculate shares: value / price
+      const shares = valueInUSDC / bestPrice
+
+      // Round to reasonable precision (2 decimals)
+      return Math.round(shares * 100) / 100
+    } catch (error: any) {
+      console.error('[ClobSDK] Error calculating share size:', error)
+      return null
+    }
+  }
+}
+
+// Singleton instance
+export const polymarketClobSDK = new PolymarketClobSDK()

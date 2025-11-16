@@ -1,17 +1,27 @@
 import { CalculatedTrade } from '../trading/position-calculator'
+import { polymarketCLOB } from '../polymarket/clob-api-client'
+import { tradeModuleV3 } from './trade-module-v3'
+import type { PolymarketOrder } from './trade-module-v3'
+import { ethers } from 'ethers'
+import prisma from '../db/prisma'
 
 export interface ExecutionResult {
   success: boolean
   transactionHash?: string
+  positionKey?: string
   error?: string
+  errorCode?: string
   executedAt: Date
   gasFee?: number
+  blockNumber?: number
+  gasUsed?: bigint
 }
 
 export class TradeExecutor {
   private mockDelayMin = 500 // ms
   private mockDelayMax = 2000 // ms
   private mockSuccessRate = parseFloat(process.env.MOCK_TRADE_SUCCESS_RATE || '0.98')
+  private useRealExecution = process.env.USE_REAL_EXECUTION === 'true'
 
   private errorMessages = [
     'Insufficient balance',
@@ -23,6 +33,181 @@ export class TradeExecutor {
   ]
 
   async executeTrade(
+    trade: CalculatedTrade,
+    userWalletAddress: string,
+    userId?: string
+  ): Promise<ExecutionResult> {
+    // Use real execution if enabled and Safe is available
+    if (this.useRealExecution && userId) {
+      return this.executeRealTrade(trade, userId)
+    }
+
+    // Fall back to mock execution
+    return this.executeMockTrade(trade, userWalletAddress)
+  }
+
+  /**
+   * Execute real trade on-chain via TradeModule smart contract
+   */
+  private async executeRealTrade(
+    trade: CalculatedTrade,
+    userId: string
+  ): Promise<ExecutionResult> {
+    try {
+      // Get user's Safe address
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { safeAddress: true, walletAddress: true },
+      })
+
+      if (!user?.safeAddress) {
+        return {
+          success: false,
+          errorCode: 'NO_SAFE_DEPLOYED',
+          error: 'User does not have a Safe deployed. Please deploy a Safe first.',
+          executedAt: new Date(),
+        }
+      }
+
+      // Get tokenId from trade
+      const tokenId = trade.asset
+
+      console.log(`[TradeExecutor] Executing real trade via TradeModule:`, {
+        safeAddress: user.safeAddress,
+        tokenId,
+        side: trade.side,
+        valueUSDC: trade.value.toFixed(6),
+      })
+
+      // 1. Verify TradeModule is enabled on Safe
+      const isEnabled = await tradeModuleV3.isEnabledOnSafe(user.safeAddress)
+      if (!isEnabled) {
+        return {
+          success: false,
+          errorCode: 'MODULE_NOT_ENABLED',
+          error: 'TradeModule not enabled on this Safe. Please enable the module first.',
+          executedAt: new Date(),
+        }
+      }
+
+      // 2. Check liquidity
+      const liquidityCheck = await polymarketCLOB.checkLiquidity(tokenId, trade.side, trade.value)
+      if (!liquidityCheck.hasLiquidity) {
+        return {
+          success: false,
+          errorCode: 'INSUFFICIENT_LIQUIDITY',
+          error: `Insufficient liquidity. Requested: ${trade.value.toFixed(2)} USDC, Available: ${liquidityCheck.availableSize.toFixed(2)} USDC`,
+          executedAt: new Date(),
+        }
+      }
+
+      // 3. Fetch best order from CLOB API
+      const order = trade.side === 'BUY'
+        ? await polymarketCLOB.getBestAsk(tokenId)
+        : await polymarketCLOB.getBestBid(tokenId)
+
+      if (!order) {
+        return {
+          success: false,
+          errorCode: 'NO_ORDERS_AVAILABLE',
+          error: 'No orders available in the order book',
+          executedAt: new Date(),
+        }
+      }
+
+      // 4. Calculate fill amount in shares
+      // Convert USDC value to shares based on order price
+      const orderPrice = parseFloat(order.price)
+      const shareSize = trade.value / orderPrice
+      const fillAmount = ethers.parseUnits(shareSize.toFixed(6), 6) // USDC has 6 decimals
+
+      console.log(`[TradeExecutor] Calculated fill:`, {
+        orderPrice: orderPrice.toFixed(4),
+        shareSize: shareSize.toFixed(6),
+        fillAmount: ethers.formatUnits(fillAmount, 6),
+      })
+
+      // 5. Convert CLOB API order to PolymarketOrder format
+      // First, validate all required fields are present
+      const requiredFields = [
+        'salt', 'maker', 'signer', 'tokenId', 'makerAmount',
+        'takerAmount', 'expiration', 'nonce', 'feeRateBps', 'signatureType', 'signature'
+      ]
+
+      const missingFields = requiredFields.filter(field =>
+        order[field as keyof typeof order] === undefined || order[field as keyof typeof order] === null
+      )
+
+      if (missingFields.length > 0) {
+        console.error(`[TradeExecutor] Order missing fields:`, missingFields)
+        console.error(`[TradeExecutor] Full order data:`, JSON.stringify(order, null, 2))
+        return {
+          success: false,
+          errorCode: 'INVALID_ORDER',
+          error: `Order missing required fields: ${missingFields.join(', ')}`,
+          executedAt: new Date(),
+        }
+      }
+
+      const polymarketOrder: PolymarketOrder = {
+        salt: order.salt,
+        maker: order.maker,
+        signer: order.signer,
+        taker: order.taker || ethers.ZeroAddress,
+        tokenId: order.tokenId,
+        makerAmount: order.makerAmount,
+        takerAmount: order.takerAmount,
+        expiration: order.expiration,
+        nonce: order.nonce,
+        feeRateBps: order.feeRateBps,
+        side: trade.side === 'BUY' ? 0 : 1,
+        signatureType: order.signatureType,
+        signature: order.signature,
+      }
+
+      // 6. Execute trade via TradeModule contract
+      console.log(`[TradeExecutor] Executing via TradeModule...`)
+      const result = await tradeModuleV3.executeTrade(
+        user.safeAddress,
+        polymarketOrder,
+        fillAmount
+      )
+
+      if (!result.success) {
+        return {
+          success: false,
+          errorCode: result.errorCode,
+          error: result.error,
+          executedAt: new Date(),
+        }
+      }
+
+      console.log(`[TradeExecutor] ✅ Real trade executed via TradeModule`)
+      console.log(`[TradeExecutor] 🔍 View on Polygonscan: https://polygonscan.com/tx/${result.transactionHash}`)
+
+      return {
+        success: true,
+        transactionHash: result.transactionHash,
+        executedAt: new Date(),
+        positionKey: `${user.safeAddress}-${trade.asset}`,
+        blockNumber: result.blockNumber,
+        gasUsed: result.gasUsed,
+      }
+    } catch (error: any) {
+      console.error('[TradeExecutor] Real execution error:', error)
+      return {
+        success: false,
+        errorCode: 'EXECUTION_ERROR',
+        error: error.message,
+        executedAt: new Date(),
+      }
+    }
+  }
+
+  /**
+   * Execute mock trade (for testing without real transactions)
+   */
+  private async executeMockTrade(
     trade: CalculatedTrade,
     userWalletAddress: string
   ): Promise<ExecutionResult> {
@@ -108,6 +293,14 @@ export class TradeExecutor {
     if (!this.errorMessages.includes(message)) {
       this.errorMessages.push(message)
     }
+  }
+
+  setUseRealExecution(enabled: boolean): void {
+    this.useRealExecution = enabled
+  }
+
+  isUsingRealExecution(): boolean {
+    return this.useRealExecution
   }
 }
 

@@ -10,6 +10,15 @@ datasource db {
 model User {
   id            String    @id @default(cuid())
   walletAddress String    @unique
+  safeAddress   String?   @unique
+  safeDeployedAt DateTime?
+
+  // Operator & Security Configuration (SignatureType 2 Architecture)
+  operatorAddress         String?  @unique
+  guardEnabled            Boolean  @default(false)
+  withdrawalModuleEnabled Boolean  @default(false)
+  securitySetupCompletedAt DateTime?
+
   email         String?   @unique
   name          String?
   createdAt     DateTime  @default(now())
@@ -23,8 +32,11 @@ model User {
   activityLogs      ActivityLog[]
   notifications     Notification[]
   portfolioSnapshots PortfolioSnapshot[]
+  operatorCredential OperatorCredential?
 
   @@index([walletAddress])
+  @@index([safeAddress])
+  @@index([operatorAddress])
   @@map("users")
 }
 
@@ -106,6 +118,11 @@ model Trade {
   value                 Float
   fee                   Float
   transactionHash       String?
+  positionKey           String?
+  blockNumber           BigInt?
+  gasUsed               BigInt?
+  gasPaid               Float?
+  performanceFee        Float?
   status                String
   executionType         String
   errorMessage          String?
@@ -120,6 +137,7 @@ model Trade {
   @@index([market])
   @@index([status])
   @@index([timestamp])
+  @@index([positionKey])
   @@index([userId, traderWalletAddress])
   @@map("trades")
 }
@@ -139,6 +157,11 @@ model Position {
   value            Float
   unrealizedPnL    Float
   realizedPnL      Float    @default(0)
+  positionKey      String?  @unique
+  entryTradeId     String?
+  exitTradeId      String?
+  onChainShares    Float?
+  onChainEntryAmount Float?
   status           String
   openedAt         DateTime @default(now())
   closedAt         DateTime?
@@ -149,6 +172,7 @@ model Position {
 
   @@index([userId, status])
   @@index([market])
+  @@index([positionKey])
   @@map("positions")
 }
 
@@ -205,4 +229,20 @@ model Notification {
   @@index([userId, isRead])
   @@index([userId, isSent])
   @@map("notifications")
+}
+
+model OperatorCredential {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  operatorAddress   String   @unique
+  apiKey            String
+  apiSecret         String
+  apiPassphrase     String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([operatorAddress])
+  @@map("operator_credentials")
 }

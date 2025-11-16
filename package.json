@@ -11,9 +11,13 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "websocket:start": "tsx scripts/websocket-listener.ts"
   },
   "dependencies": {
+    "@polymarket/builder-relayer-client": "^0.0.6",
+    "@polymarket/builder-signing-sdk": "^0.0.8",
+    "@polymarket/clob-client": "^4.22.8",
     "@polymarket/real-time-data-client": "^1.0.0",
     "@prisma/client": "^6.0.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -28,11 +32,15 @@
     "@radix-ui/react-tabs": "^1.1.1",
     "@radix-ui/react-toast": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@safe-global/protocol-kit": "^6.1.1",
+    "@safe-global/safe-core-sdk-types": "^5.1.0",
+    "@safe-global/types-kit": "^3.0.0",
     "@sendgrid/mail": "^8.1.4",
     "@tanstack/react-query": "^5.62.11",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ethers": "^6.15.0",
     "lucide-react": "^0.468.0",
     "next": "15.1.5",
     "next-auth": "^5.0.0-beta.25",
@@ -41,10 +49,10 @@
     "recharts": "^2.15.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "viem": "^2.21.66",
+    "tsx": "^4.20.6",
+    "viem": "^2.39.0",
     "wagmi": "^2.14.17",
-    "zustand": "^5.0.3",
-    "tsx": "^4.20.6"
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

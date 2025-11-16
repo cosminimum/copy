@@ -1,6 +1,6 @@
 import { TradeMessage } from '../polymarket/types'
 import { positionCalculator, CopySettings } from '../trading/position-calculator'
-import { tradeExecutor } from '../contracts/trade-executor'
+import { tradeExecutorV2 } from '../contracts/trade-executor-v2'
 import prisma from '../db/prisma'
 
 export class TradeOrchestrator {
@@ -128,7 +128,7 @@ export class TradeOrchestrator {
 
       this.log('debug', `Calculated trade size: ${calculatedTrade.size} (value: $${calculatedTrade.value.toFixed(2)})`)
 
-      // Get current positions
+      // Get current positions (for future validation needs)
       const currentPositions = await prisma.position.findMany({
         where: {
           userId,
@@ -137,32 +137,35 @@ export class TradeOrchestrator {
         select: {
           market: true,
           size: true,
+          value: true,
         },
       })
 
       // Validate trade
-      const isValid = positionCalculator.validateTrade(
+      const validation = positionCalculator.validateTrade(
         calculatedTrade,
         currentPositions,
         copySettings as CopySettings
       )
 
-      if (!isValid) {
-        this.log('warn', 'Trade validation failed (limits exceeded), skipping')
-        return
+      if (!validation.valid) {
+        const errorMsg = `Trade validation failed: ${validation.reason}`
+        this.log('warn', errorMsg)
+        throw new Error(errorMsg) // Throw so outer catch counts it as failed
       }
 
-      // Execute trade (simulated)
-      this.log('debug', `Executing ${calculatedTrade.side} trade...`)
-      const executionResult = await tradeExecutor.executeTrade(
+      // Execute trade
+      this.log('debug', `Executing ${calculatedTrade.side} trade via SignatureType 2...`)
+      const executionResult = await tradeExecutorV2.executeTrade(
         calculatedTrade,
-        userWalletAddress
+        userId
       )
 
       if (executionResult.success) {
         this.log('info', `✅ Trade executed successfully: ${calculatedTrade.side} ${calculatedTrade.size} @ $${calculatedTrade.price}`)
       } else {
         this.log('error', `❌ Trade execution failed: ${executionResult.error}`)
+        throw new Error(executionResult.error || 'Trade execution failed')
       }
 
       const tradeRecord = await prisma.trade.create({
@@ -181,10 +184,17 @@ export class TradeOrchestrator {
           value: calculatedTrade.value,
           fee: executionResult.gasFee || 0,
           transactionHash: executionResult.transactionHash,
-          // PENDING: waiting for transaction confirmation, FAILED: transaction failed
-          status: executionResult.success ? 'PENDING' : 'FAILED',
+          positionKey: executionResult.positionKey,
+          blockNumber: executionResult.blockNumber ? BigInt(executionResult.blockNumber) : null,
+          gasUsed: executionResult.gasUsed,
+          gasPaid: executionResult.gasFee,
+          // COMPLETED: trade executed successfully (tx already confirmed in executor)
+          // FAILED: trade execution failed
+          status: executionResult.success ? 'COMPLETED' : 'FAILED',
           executionType: 'COPY',
-          errorMessage: executionResult.error,
+          errorMessage: executionResult.error
+            ? `[${executionResult.errorCode || 'ERROR'}] ${executionResult.error}`
+            : null,
           timestamp: executionResult.executedAt,
         },
       })
@@ -215,6 +225,7 @@ export class TradeOrchestrator {
       })
     } catch (error) {
       console.error('Error executing copy trade:', error)
+      throw error // Re-throw so outer catch can count it as failed
     }
   }
 
@@ -282,6 +293,25 @@ export class TradeOrchestrator {
   }
 
   private async getUserBalance(userId: string): Promise<number> {
+    // With TradeModule architecture, get real USDC balance from Safe
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { safeAddress: true },
+    })
+
+    if (user?.safeAddress) {
+      try {
+        // Import dynamically to avoid circular dependencies
+        const { tradeModuleV3 } = await import('../contracts/trade-module-v3')
+        const safeBalance = await tradeModuleV3.getSafeBalance(user.safeAddress)
+        this.log('debug', `Real Safe balance: $${safeBalance.toFixed(2)}`)
+        return safeBalance
+      } catch (error) {
+        this.log('warn', `Could not fetch Safe balance, falling back to snapshot: ${error}`)
+      }
+    }
+
+    // Fallback to portfolio snapshot or default
     const snapshot = await prisma.portfolioSnapshot.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },

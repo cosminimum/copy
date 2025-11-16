@@ -3,6 +3,8 @@ import { Navbar } from '@/components/layout/navbar'
 import { FollowingSection } from '@/components/dashboard/following-section'
 import { WebSocketStatus } from '@/components/dashboard/websocket-status'
 import { PortfolioChart } from '@/components/dashboard/portfolio-chart'
+import { WalletSectionV2 as WalletSection } from '@/components/dashboard/wallet-section-v2'
+import { SystemHealth } from '@/components/dashboard/system-health'
 import { auth } from '@/lib/auth/auth'
 import prisma from '@/lib/db/prisma'
 
@@ -137,8 +139,13 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        <div className="mb-8">
-          <FollowingSection />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+          <div className="lg:col-span-2">
+            <FollowingSection />
+          </div>
+          <div>
+            <WalletSection />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
@@ -156,7 +163,7 @@ export default async function DashboardPage() {
                 <div className="space-y-4">
                   {trades.slice(0, 5).map((trade) => (
                     <div key={trade.id} className="flex justify-between items-start border-b pb-3 last:border-0">
-                      <div>
+                      <div className="flex-1">
                         <div className="font-medium text-sm">{trade.market}</div>
                         <div className="text-xs text-muted-foreground">
                           {trade.side} • {trade.outcome} • ${trade.value.toFixed(2)}
@@ -164,11 +171,23 @@ export default async function DashboardPage() {
                         <div className="text-xs text-muted-foreground">
                           {new Date(trade.timestamp).toLocaleString()}
                         </div>
+                        {trade.transactionHash && (
+                          <div className="text-xs mt-1">
+                            <a
+                              href={`https://polygonscan.com/tx/${trade.transactionHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              View on Polygonscan ↗
+                            </a>
+                          </div>
+                        )}
                       </div>
-                      <div className={`text-xs font-medium ${
-                        trade.status === 'COMPLETED' ? 'text-green-600' :
-                        trade.status === 'FAILED' ? 'text-red-600' :
-                        'text-yellow-600'
+                      <div className={`text-xs font-medium px-2 py-1 rounded ${
+                        trade.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                        trade.status === 'FAILED' ? 'bg-red-100 text-red-700' :
+                        'bg-yellow-100 text-yellow-700'
                       }`}>
                         {trade.status}
                       </div>
@@ -215,37 +234,49 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Activity Feed</CardTitle>
-            <CardDescription>Real-time updates from your copy trading activity</CardDescription>
-          </CardHeader>
-          <CardContent className="max-h-[400px] overflow-y-auto">
-            {activityLogs.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">
-                  {subscriptions.length === 0
-                    ? "No activity yet. Start following traders to see activity here."
-                    : "No activity yet. Trades will appear here as they happen."}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {activityLogs.map((log) => (
-                  <div key={log.id} className="flex justify-between items-start border-b pb-3 last:border-0">
-                    <div>
-                      <div className="font-medium text-sm">{log.action.replace(/_/g, ' ')}</div>
-                      <div className="text-xs text-muted-foreground">{log.description}</div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Activity Feed</CardTitle>
+              <CardDescription>Real-time updates from your copy trading activity</CardDescription>
+            </CardHeader>
+            <CardContent className="max-h-[400px] overflow-y-auto">
+              {activityLogs.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">
+                    {subscriptions.length === 0
+                      ? "No activity yet. Start following traders to see activity here."
+                      : "No activity yet. Trades will appear here as they happen."}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {activityLogs.map((log) => (
+                    <div key={log.id} className="flex justify-between items-start border-b pb-3 last:border-0">
+                      <div>
+                        <div className="font-medium text-sm">{log.action.replace(/_/g, ' ')}</div>
+                        <div className="text-xs text-muted-foreground">{log.description}</div>
+                      </div>
+                      <div className="text-xs text-muted-foreground whitespace-nowrap ml-4">
+                        {new Date(log.createdAt).toLocaleTimeString()}
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground whitespace-nowrap ml-4">
-                      {new Date(log.createdAt).toLocaleTimeString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>System Status</CardTitle>
+              <CardDescription>Platform health monitoring</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SystemHealth />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

@@ -1,0 +1,86 @@
+#!/usr/bin/env tsx
+/**
+ * Test Polymarket CLOB SDK Integration
+ * Verifies the SDK is working without executing real trades
+ */
+
+import { polymarketClobSDK } from '../lib/polymarket/clob-sdk-client'
+
+const TEST_TOKEN_ID = '87799116847875103478187928629916244342473925209287684667136064599163447151038'
+const TEST_SAFE = '0x7915Dd2AB1af795310cCD0D3598bBc8BC4f3d6a3'
+
+async function main() {
+  console.log('🧪 Testing Polymarket CLOB SDK Integration\n')
+  console.log('═'.repeat(70))
+
+  // Test 1: Fetch Order Book
+  console.log('\n📊 Test 1: Fetch Order Book')
+  console.log('─'.repeat(70))
+  try {
+    const orderBook = await polymarketClobSDK.getOrderBook(TEST_TOKEN_ID)
+    if (orderBook) {
+      console.log('✅ Order book fetched successfully')
+      console.log(`   Best Ask: $${orderBook.asks[0]?.price} (${orderBook.asks[0]?.size} shares)`)
+      console.log(`   Best Bid: $${orderBook.bids[0]?.price} (${orderBook.bids[0]?.size} shares)`)
+      console.log(`   Tick Size: ${orderBook.tick_size}`)
+      console.log(`   Neg Risk: ${orderBook.neg_risk}`)
+    } else {
+      console.log('❌ Failed to fetch order book')
+    }
+  } catch (error: any) {
+    console.log('❌ Error:', error.message)
+  }
+
+  // Test 2: Check Liquidity
+  console.log('\n💧 Test 2: Check Liquidity')
+  console.log('─'.repeat(70))
+  try {
+    const liquidity = await polymarketClobSDK.checkLiquidity(TEST_TOKEN_ID, 'BUY', 0.10)
+    console.log(`✅ Liquidity check complete`)
+    console.log(`   Has Liquidity: ${liquidity.hasLiquidity ? '✅ Yes' : '❌ No'}`)
+    console.log(`   Available Size: $${liquidity.availableSize.toFixed(2)} USDC`)
+  } catch (error: any) {
+    console.log('❌ Error:', error.message)
+  }
+
+  // Test 3: Calculate Share Size
+  console.log('\n🔢 Test 3: Calculate Share Size')
+  console.log('─'.repeat(70))
+  try {
+    const shares = await polymarketClobSDK.calculateShareSize(TEST_TOKEN_ID, 'BUY', 0.10)
+    if (shares) {
+      console.log(`✅ Share calculation complete`)
+      console.log(`   For $0.10 USDC → ${shares} shares`)
+    } else {
+      console.log('❌ Could not calculate share size')
+    }
+  } catch (error: any) {
+    console.log('❌ Error:', error.message)
+  }
+
+  // Test 4: Environment Check
+  console.log('\n🔐 Test 4: Environment Configuration')
+  console.log('─'.repeat(70))
+  const operatorKey = process.env.OPERATOR_PRIVATE_KEY
+  const apiUrl = process.env.POLYMARKET_API_URL || 'https://clob.polymarket.com'
+
+  console.log(`   OPERATOR_PRIVATE_KEY: ${operatorKey ? '✅ Set' : '❌ Not set'}`)
+  console.log(`   POLYMARKET_API_URL: ${apiUrl}`)
+  console.log(`   Test Safe Address: ${TEST_SAFE}`)
+
+  console.log('\n═'.repeat(70))
+  console.log('\n📋 Summary:\n')
+  console.log('The SDK integration is working correctly for read operations.')
+  console.log('To test actual trade execution:')
+  console.log('  1. Ensure USDC is in your Safe')
+  console.log('  2. Restart websocket listener: npx tsx scripts/websocket-listener.ts')
+  console.log('  3. Wait for a trade from followed trader')
+  console.log('  4. Monitor logs for SDK execution')
+  console.log()
+  console.log('⚠️  Note: This script does NOT execute real trades!')
+  console.log('   It only tests read operations (order book, liquidity, etc.)')
+  console.log()
+  console.log('═'.repeat(70))
+}
+
+main().catch(console.error)

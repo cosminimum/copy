@@ -72,25 +72,26 @@ export class PositionCalculator {
 
   validateTrade(
     calculatedTrade: CalculatedTrade,
-    currentPositions: { market: string; size: number }[],
+    currentPositions: { market: string; size: number; value?: number }[],
     settings: CopySettings
-  ): boolean {
+  ): { valid: boolean; reason?: string } {
     if (calculatedTrade.size <= 0) {
-      return false
+      return {
+        valid: false,
+        reason: `Trade size is ${calculatedTrade.size} (must be > 0)`
+      }
     }
 
-    const totalPositionInMarket = currentPositions
-      .filter(p => p.market === calculatedTrade.market)
-      .reduce((sum, p) => sum + p.size, 0)
-
-    if (
-      settings.maxPositionSize &&
-      totalPositionInMarket + calculatedTrade.size > settings.maxPositionSize
-    ) {
-      return false
+    // Max position size limits the value of THIS SINGLE TRADE
+    // This protects against copying huge trades from the trader
+    if (settings.maxPositionSize && calculatedTrade.value > settings.maxPositionSize) {
+      return {
+        valid: false,
+        reason: `Trade size ($${calculatedTrade.value.toFixed(2)}) exceeds max position size limit ($${settings.maxPositionSize})`
+      }
     }
 
-    return true
+    return { valid: true }
   }
 }
 
