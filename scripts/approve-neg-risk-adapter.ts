@@ -23,6 +23,8 @@ async function main() {
   if (!userEOA) {
     console.error('Usage: npx tsx scripts/approve-neg-risk-adapter.ts <USER_EOA>');
     process.exit(1);
+
+
   }
 
   console.log('🔧 Approving USDC.e to Neg Risk Adapter\n');
