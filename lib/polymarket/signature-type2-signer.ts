@@ -18,6 +18,7 @@
 import { ethers } from 'ethers';
 import { ClobClient, Side, OrderType, ApiKeyCreds } from '@polymarket/clob-client';
 import { createV5CompatibleWallet, CLOBCredentials } from './credential-manager';
+import { configureAxiosForCloudflare } from './axios-config';
 
 // OrderArgs type (from CLOB client)
 interface OrderArgs {
@@ -87,6 +88,9 @@ export function createSignatureType2Client(
   safeAddress: string,
   chainId: number = 137
 ): ClobClient {
+  // Configure axios for Cloudflare bypass (proxy + headers)
+  configureAxiosForCloudflare();
+
   // Create v5-compatible wallet for CLOB client
   const v5Wallet = createV5CompatibleWallet(operatorPrivateKey);
 
