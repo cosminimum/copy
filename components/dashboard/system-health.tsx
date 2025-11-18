@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,15 +35,27 @@ interface HealthStatus {
 }
 
 export function SystemHealth({ compact = false }: { compact?: boolean }) {
+  const { data: session, status } = useSession()
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Load health data when authenticated
   useEffect(() => {
-    fetchHealth()
-    // Refresh every 60 seconds
-    const interval = setInterval(fetchHealth, 60000)
-    return () => clearInterval(interval)
-  }, [])
+    if (status === 'authenticated') {
+      fetchHealth()
+      // Refresh every 60 seconds
+      const interval = setInterval(fetchHealth, 60000)
+      return () => clearInterval(interval)
+    }
+  }, [status])
+
+  // Clear state when session ends
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      setHealth(null)
+      setLoading(false)
+    }
+  }, [status])
 
   const fetchHealth = async () => {
     try {

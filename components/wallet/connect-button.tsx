@@ -124,14 +124,16 @@ export function ConnectButton() {
   const handleDisconnect = async () => {
     try {
       signingAttemptedRef.current = false // Reset for next connection
-      await signOut()
       disconnect()
-      toast({
-        title: "Disconnected",
-        description: "Your wallet has been disconnected.",
-      })
+      // Force redirect to home page to clear all state
+      await signOut({ callbackUrl: '/', redirect: true })
     } catch (error) {
       console.error('Disconnect error:', error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to disconnect. Please refresh the page.",
+      })
     }
   }
 

@@ -18,6 +18,7 @@ model User {
   guardEnabled            Boolean  @default(false)
   withdrawalModuleEnabled Boolean  @default(false)
   securitySetupCompletedAt DateTime?
+  onboardingCompletedAt   DateTime?
 
   email         String?   @unique
   name          String?

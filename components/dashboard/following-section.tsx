@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
@@ -37,6 +38,7 @@ interface Following {
 }
 
 export function FollowingSection() {
+  const { data: session, status } = useSession()
   const [following, setFollowing] = useState<Following[]>([])
   const [loading, setLoading] = useState(true)
   const [unfollowingWallet, setUnfollowingWallet] = useState<string | null>(null)
@@ -45,9 +47,20 @@ export function FollowingSection() {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const { toast } = useToast()
 
+  // Load following list when component mounts and session is available
   useEffect(() => {
-    loadFollowing()
-  }, [])
+    if (status === 'authenticated') {
+      loadFollowing()
+    }
+  }, [status])
+
+  // Clear state when session ends
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      setFollowing([])
+      setLoading(false)
+    }
+  }, [status])
 
   const loadFollowing = async () => {
     try {

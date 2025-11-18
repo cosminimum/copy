@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -50,6 +51,7 @@ interface SecurityStatus {
 
 export function WalletSectionV2() {
   const { address: walletAddress, isConnected } = useAccount()
+  const { data: session, status } = useSession()
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null)
   const [securityStatus, setSecurityStatus] = useState<SecurityStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -60,9 +62,23 @@ export function WalletSectionV2() {
   const [error, setError] = useState<string | null>(null)
   const [fundingInstructions, setFundingInstructions] = useState<any>(null)
 
+  // Load wallet info when authenticated and connected
   useEffect(() => {
-    fetchWalletInfo()
-  }, [])
+    if (isConnected && status === 'authenticated') {
+      fetchWalletInfo()
+    }
+  }, [isConnected, status])
+
+  // Clear state when disconnected or unauthenticated
+  useEffect(() => {
+    if (!isConnected || status === 'unauthenticated') {
+      setWalletInfo(null)
+      setSecurityStatus(null)
+      setLoading(false)
+      setError(null)
+      setFundingInstructions(null)
+    }
+  }, [isConnected, status])
 
   useEffect(() => {
     if (walletInfo?.safeStatus === 'deployed' && walletInfo.safeAddress) {

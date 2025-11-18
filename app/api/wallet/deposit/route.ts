@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import prisma from '@/lib/db/prisma'
-import { deploySafeViaRelayer, isSafeDeployed } from '@/lib/contracts/safe-deployer-v2'
+import { deploySafeViaRelayer, isSafeDeployed, getSafeAddress } from '@/lib/contracts/safe-deployer-v2'
 import { deriveOperatorWallet } from '@/lib/operators/wallet-derivation'
 import { ethers } from 'ethers'
 
@@ -156,28 +156,43 @@ export async function POST(req: NextRequest) {
     console.log(`[Deposit API] User EOA: ${user.walletAddress}`)
     console.log(`[Deposit API] Operator (Safe owner): ${operatorWallet.address}`)
 
-    // Deploy Safe via Polymarket Relayer with operator as owner
-    const deployment = await deploySafeViaRelayer(operatorWallet.privateKey)
+    // Get the deterministic Safe address (works even if not deployed yet)
+    const predictedSafeAddress = await getSafeAddress(operatorWallet.address)
+    console.log(`[Deposit API] Predicted Safe address: ${predictedSafeAddress}`)
 
-    if (!deployment.success || !deployment.safeAddress) {
-      return NextResponse.json(
-        {
-          error: deployment.error || 'Failed to deploy Safe',
-          details: 'Safe deployment via Polymarket Relayer failed. Please try again.',
-        },
-        { status: 500 }
-      )
+    // Check if Safe is already deployed on-chain
+    const alreadyDeployed = await isSafeDeployed(predictedSafeAddress)
+    console.log(`[Deposit API] Safe already deployed: ${alreadyDeployed}`)
+
+    let deploymentMethod = 'predicted'
+    let transactionHash: string | undefined = undefined
+
+    if (!alreadyDeployed) {
+      // Try to deploy via Polymarket Relayer (gasless)
+      console.log('[Deposit API] Attempting gasless deployment via Polymarket Relayer...')
+      const deployment = await deploySafeViaRelayer(operatorWallet.privateKey)
+
+      if (deployment.success && deployment.safeAddress) {
+        console.log(`[Deposit API] ✅ Safe deployed at: ${deployment.safeAddress}`)
+        transactionHash = deployment.transactionHash
+        deploymentMethod = 'polymarket-relayer'
+      } else {
+        console.warn(`[Deposit API] ⚠️  Relayer deployment failed: ${deployment.error}`)
+        console.log('[Deposit API] Using predicted address. Safe will auto-deploy on first trade.')
+        deploymentMethod = 'predicted-pending'
+      }
+    } else {
+      console.log('[Deposit API] ✅ Safe already exists on-chain')
+      deploymentMethod = 'already-deployed'
     }
 
-    console.log(`[Deposit API] ✅ Safe deployed at: ${deployment.safeAddress}`)
     console.log(`[Deposit API] Owner: ${operatorWallet.address} (Operator)`)
-    console.log(`[Deposit API] Transaction: ${deployment.transactionHash || 'N/A'}`)
 
-    // Update user with Safe address and operator address
+    // Update user with Safe address (using predicted address even if deployment is pending)
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        safeAddress: deployment.safeAddress,
+        safeAddress: predictedSafeAddress,
         operatorAddress: operatorWallet.address,
         safeDeployedAt: new Date(),
       },
@@ -188,12 +203,14 @@ export async function POST(req: NextRequest) {
       data: {
         userId: user.id,
         action: 'SAFE_DEPLOYED',
-        description: `Gnosis Safe deployed at ${deployment.safeAddress} (gasless via Polymarket Relayer)`,
+        description: deploymentMethod === 'predicted-pending'
+          ? `Safe address generated: ${predictedSafeAddress} (will deploy on first trade)`
+          : `Gnosis Safe deployed at ${predictedSafeAddress}`,
         metadata: {
-          safeAddress: deployment.safeAddress,
+          safeAddress: predictedSafeAddress,
           operatorAddress: operatorWallet.address,
-          transactionHash: deployment.transactionHash,
-          deploymentMethod: 'polymarket-relayer',
+          transactionHash,
+          deploymentMethod,
         },
       },
     })
@@ -203,10 +220,12 @@ export async function POST(req: NextRequest) {
       data: {
         userId: user.id,
         type: 'SAFE_DEPLOYED',
-        title: 'Safe Deployed',
-        message: `Your trading Safe has been deployed successfully (gasless). Owner: Operator wallet. You can now deposit USDC.e to start trading.`,
+        title: deploymentMethod === 'predicted-pending' ? 'Safe Address Generated' : 'Safe Deployed',
+        message: deploymentMethod === 'predicted-pending'
+          ? `Your Safe address has been generated. The Safe will be deployed automatically when you make your first trade. You can deposit USDC.e now.`
+          : `Your trading Safe has been deployed successfully. Owner: Operator wallet. You can now deposit USDC.e to start trading.`,
         metadata: {
-          safeAddress: deployment.safeAddress,
+          safeAddress: predictedSafeAddress,
           operatorAddress: operatorWallet.address,
         },
       },
@@ -214,11 +233,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      safeAddress: deployment.safeAddress,
+      safeAddress: predictedSafeAddress,
       operatorAddress: operatorWallet.address,
-      transactionHash: deployment.transactionHash,
-      deploymentMethod: 'polymarket-relayer',
-      message: 'Safe deployed successfully (gasless). Operator is the Safe owner. You can now deposit USDC.e.',
+      transactionHash,
+      deploymentMethod,
+      message: deploymentMethod === 'predicted-pending'
+        ? 'Safe address generated. The Safe will auto-deploy on first trade. You can deposit USDC.e now.'
+        : 'Safe deployed successfully. Operator is the Safe owner. You can now deposit USDC.e.',
     })
   } catch (error: any) {
     console.error('POST /api/wallet/deposit error:', error)

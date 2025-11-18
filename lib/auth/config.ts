@@ -54,17 +54,49 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.walletAddress = user.walletAddress
         token.id = user.id
       }
+
+      // Refetch user data when session is updated (e.g., after onboarding)
+      if (trigger === 'update' && token.id) {
+        const updatedUser = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: {
+            id: true,
+            walletAddress: true,
+            onboardingCompletedAt: true,
+            email: true,
+            name: true,
+          },
+        })
+
+        if (updatedUser) {
+          token.onboardingCompletedAt = updatedUser.onboardingCompletedAt?.toISOString() || null
+        }
+      }
+
       return token
     },
     async session({ session, token }) {
       if (token) {
         session.user.id = token.id as string
         session.user.walletAddress = token.walletAddress as string
+
+        // Fetch latest user data to include onboarding status
+        const user = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: {
+            onboardingCompletedAt: true,
+          },
+        })
+
+        if (user) {
+          // @ts-ignore - Add onboardingCompletedAt to session
+          session.user.onboardingCompletedAt = user.onboardingCompletedAt?.toISOString() || null
+        }
       }
       return session
     },
