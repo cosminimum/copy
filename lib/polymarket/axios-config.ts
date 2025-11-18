@@ -1,16 +1,16 @@
 /**
  * Axios Configuration for Cloudflare Bypass using Scrape.do
  *
- * Configures axios to route requests through scrape.do API to bypass
- * Cloudflare blocking when running on cloud infrastructure (Railway, etc.)
+ * This module patches axios at the MODULE level to ensure ALL axios instances
+ * (including those created by @polymarket/clob-client) route through scrape.do
  *
  * Scrape.do API: https://scrape.do/
  * - Routes requests through their proxy network
  * - Handles Cloudflare challenges automatically
  * - Token is hardcoded for simplicity
+ *
+ * IMPORTANT: This must be imported BEFORE any CLOB client code loads!
  */
-
-import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
 // Scrape.do configuration
 const SCRAPE_DO_TOKEN = 'bc113e34f8584ac0936675f5df2ad52ea7b101f0ce7';
@@ -29,120 +29,107 @@ const PROXY_DOMAINS = [
  * Check if a URL should be proxied through scrape.do
  */
 function shouldProxy(url: string): boolean {
+  if (!url) return false;
+
   try {
-    const urlObj = new URL(url);
-    return PROXY_DOMAINS.some(domain => urlObj.hostname.includes(domain));
+    // Handle both full URLs and relative paths
+    if (url.startsWith('http')) {
+      const urlObj = new URL(url);
+      return PROXY_DOMAINS.some(domain => urlObj.hostname.includes(domain));
+    } else {
+      // Relative URL - check if it's for a proxied domain
+      return false;
+    }
   } catch {
     return false;
   }
 }
 
 /**
- * Configure axios to use scrape.do for Cloudflare bypass
- * Call this before creating any CLOB clients
+ * Transform URL to go through scrape.do
+ */
+function transformUrl(url: string, baseURL?: string): string {
+  // Build full URL
+  let fullUrl = url;
+  if (baseURL && !url.startsWith('http')) {
+    fullUrl = baseURL.endsWith('/') && url.startsWith('/')
+      ? baseURL + url.substring(1)
+      : baseURL + url;
+  }
+
+  // Encode and route through scrape.do
+  const encodedUrl = encodeURIComponent(fullUrl);
+  return `${SCRAPE_DO_API}?token=${SCRAPE_DO_TOKEN}&url=${encodedUrl}`;
+}
+
+/**
+ * Patch axios at the module level to intercept ALL instances
+ * This works by patching the axios package's request adapter
  */
 export function configureAxiosForCloudflare(): void {
   if (configured) {
-    return; // Already configured
+    console.log('[AxiosConfig] Already configured, skipping...');
+    return;
   }
 
-  console.log('[AxiosConfig] Configuring scrape.do proxy for Cloudflare bypass...');
+  try {
+    console.log('[AxiosConfig] ===============================================');
+    console.log('[AxiosConfig] Patching axios module for scrape.do proxy...');
+    console.log('[AxiosConfig] Token:', SCRAPE_DO_TOKEN.substring(0, 15) + '...');
+    console.log('[AxiosConfig] Domains:', PROXY_DOMAINS.join(', '));
 
-  // Request interceptor: Route requests through scrape.do
-  axios.interceptors.request.use(
-    (config: InternalAxiosRequestConfig) => {
-      // Skip if this is already a scrape.do request
-      if (config.url?.includes('api.scrape.do')) {
-        return config;
+    // Import axios module
+    const axios = require('axios');
+
+    // Store original adapter
+    const originalAdapter = axios.defaults.adapter;
+
+    // Create custom adapter that wraps the original
+    axios.defaults.adapter = async function scrapedoAdapter(config: any) {
+      const originalUrl = config.url;
+      const originalBaseURL = config.baseURL;
+
+      // Build full URL for checking
+      let fullUrl = originalUrl || '';
+      if (originalBaseURL && !fullUrl.startsWith('http')) {
+        fullUrl = originalBaseURL.endsWith('/') && fullUrl.startsWith('/')
+          ? originalBaseURL + fullUrl.substring(1)
+          : originalBaseURL + fullUrl;
+      } else if (!fullUrl.startsWith('http')) {
+        fullUrl = originalUrl;
       }
 
-      // Check if this URL should be proxied
-      const originalUrl = config.url || '';
-      if (!shouldProxy(originalUrl)) {
-        return config;
+      // Check if we should proxy this request
+      if (shouldProxy(fullUrl) && !originalUrl?.includes('api.scrape.do')) {
+        console.log('[AxiosConfig] 🔄 Proxying:', fullUrl);
+
+        // Transform the URL to go through scrape.do
+        config.url = transformUrl(originalUrl, originalBaseURL);
+
+        // Remove baseURL since we now have full URL
+        delete config.baseURL;
+
+        console.log('[AxiosConfig] ➡️  Via:', config.url.substring(0, 80) + '...');
       }
 
-      // Build the full URL with base URL if needed
-      let fullUrl = originalUrl;
-      if (config.baseURL && !originalUrl.startsWith('http')) {
-        fullUrl = `${config.baseURL}${originalUrl}`;
-      }
+      // Call original adapter
+      return originalAdapter(config);
+    };
 
-      // Store original URL for logging
-      const originalFullUrl = fullUrl;
-
-      // Encode the target URL
-      const encodedUrl = encodeURIComponent(fullUrl);
-
-      // Rewrite request to go through scrape.do
-      config.url = `${SCRAPE_DO_API}?token=${SCRAPE_DO_TOKEN}&url=${encodedUrl}`;
-
-      // Remove baseURL since we're using the full URL now
-      delete config.baseURL;
-
-      // Preserve the original HTTP method
-      // scrape.do will forward it to the target
-
-      console.log(`[AxiosConfig] Proxying request: ${originalFullUrl}`);
-
-      return config;
-    },
-    (error) => {
-      return Promise.reject(error);
-    }
-  );
-
-  // Response interceptor: Handle errors and retries
-  axios.interceptors.response.use(
-    (response) => response,
-    async (error) => {
-      const config = error.config;
-
-      // Don't retry if we've already retried
-      if (config.__retryCount >= 2) {
-        console.error('[AxiosConfig] Max retries reached, giving up');
-        return Promise.reject(error);
-      }
-
-      config.__retryCount = config.__retryCount || 0;
-
-      // Retry on network errors, 5xx errors, or 403 (Cloudflare block)
-      const shouldRetry =
-        !error.response ||
-        error.response.status === 403 ||
-        (error.response.status >= 500 && error.response.status < 600) ||
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT';
-
-      if (shouldRetry) {
-        config.__retryCount += 1;
-
-        // Wait before retrying (exponential backoff)
-        const delay = Math.min(1000 * Math.pow(2, config.__retryCount), 5000);
-        await new Promise(resolve => setTimeout(resolve, delay));
-
-        console.log(`[AxiosConfig] Retrying request (attempt ${config.__retryCount}/2)...`);
-        return axios(config);
-      }
-
-      return Promise.reject(error);
-    }
-  );
-
-  // Set reasonable timeout
-  axios.defaults.timeout = 30000; // 30 seconds
-
-  configured = true;
-  console.log('[AxiosConfig] ✅ Axios configured with scrape.do proxy');
-  console.log('[AxiosConfig] Token:', SCRAPE_DO_TOKEN.substring(0, 10) + '...');
-  console.log('[AxiosConfig] Proxying domains:', PROXY_DOMAINS.join(', '));
+    configured = true;
+    console.log('[AxiosConfig] ✅ Axios module patched successfully!');
+    console.log('[AxiosConfig] ===============================================');
+  } catch (error) {
+    console.error('[AxiosConfig] ❌ Failed to patch axios:', error);
+    throw error;
+  }
 }
 
 /**
  * Check if proxy is configured
  */
 export function isProxyConfigured(): boolean {
-  return true; // Always true since scrape.do token is hardcoded
+  return configured;
 }
 
 /**

@@ -20,7 +20,6 @@
 import { ethers } from 'ethers';
 import { ClobClient } from '@polymarket/clob-client';
 import { PrismaClient } from '@prisma/client';
-import { configureAxiosForCloudflare } from './axios-config';
 
 const prisma = new PrismaClient();
 
@@ -81,8 +80,8 @@ export async function createCLOBCredentials(
   operatorPrivateKey: string,
   chainId: number = 137
 ): Promise<CLOBCredentials> {
-  // Configure axios for Cloudflare bypass (proxy + headers)
-  configureAxiosForCloudflare();
+  // Note: axios is configured globally at app startup
+  // See scripts/websocket-listener.ts for axios configuration
 
   // Create v5-compatible wallet for CLOB client
   const v5Wallet = createV5CompatibleWallet(operatorPrivateKey);

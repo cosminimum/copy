@@ -15,6 +15,11 @@
  *   3. Configure copy settings for each followed trader
  */
 
+// IMPORTANT: Configure axios BEFORE any other imports
+// This patches the axios module globally to route requests through scrape.do
+import { configureAxiosForCloudflare } from '../lib/polymarket/axios-config.js'
+configureAxiosForCloudflare()
+
 import { PrismaClient } from '@prisma/client'
 import { PolymarketWebSocketService } from '../lib/polymarket/websocket-client.js'
 import { TradeOrchestrator } from '../lib/orchestration/trade-orchestrator.js'
