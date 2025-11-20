@@ -168,6 +168,11 @@ export class TradeOrchestrator {
         throw new Error(executionResult.error || 'Trade execution failed')
       }
 
+      // Use actual filled amount from execution result (not calculated size)
+      // This handles partial fills correctly
+      const actualSize = executionResult.fillAmount || calculatedTrade.size;
+      const actualValue = executionResult.actualCost || calculatedTrade.value;
+
       const tradeRecord = await prisma.trade.create({
         data: {
           userId,
@@ -180,8 +185,8 @@ export class TradeOrchestrator {
           outcomeIndex: calculatedTrade.outcomeIndex,
           side: calculatedTrade.side,
           price: calculatedTrade.price,
-          size: calculatedTrade.size,
-          value: calculatedTrade.value,
+          size: actualSize, // Use actual filled amount, not requested amount
+          value: actualValue, // Use actual cost, not calculated value
           fee: executionResult.gasFee || 0,
           transactionHash: executionResult.transactionHash,
           positionKey: executionResult.positionKey,
@@ -200,7 +205,13 @@ export class TradeOrchestrator {
       })
 
       if (executionResult.success) {
-        await this.updateOrCreatePosition(userId, calculatedTrade, tradeRecord.id)
+        // Create trade object with actual filled amounts for position tracking
+        const actualTrade = {
+          ...calculatedTrade,
+          size: actualSize,
+          value: actualValue,
+        };
+        await this.updateOrCreatePosition(userId, actualTrade, tradeRecord.id)
 
         await this.createNotification(
           userId,
