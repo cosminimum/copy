@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
+import { parseUnits, formatUnits, maxUint256 } from 'viem'
 import {
   Dialog,
   DialogContent,
@@ -14,8 +15,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle2, ExternalLink, Info } from 'lucide-react'
 import { ethers } from 'ethers'
+import {
+  USER_WITHDRAWAL_MODULE,
+  USER_WITHDRAWAL_MODULE_ABI,
+  USDC_E_ADDRESS
+} from '@/lib/contracts/withdrawal-module-abi'
 
 interface WithdrawModalProps {
   isOpen: boolean
@@ -25,24 +31,25 @@ interface WithdrawModalProps {
 
 interface WithdrawInfo {
   balance: number
-  lockedFunds: number
-  availableToWithdraw: number
+  safeAddress: string
   isAuthorized: boolean
+  moduleAddress: string
+  usdcAddress: string
 }
 
 export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps) {
   const { address: connectedAddress } = useAccount()
   const queryClient = useQueryClient()
+  const { writeContract, data: hash, isPending, error: writeError } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
 
   const [withdrawInfo, setWithdrawInfo] = useState<WithdrawInfo | null>(null)
   const [amount, setAmount] = useState('')
   const [recipient, setRecipient] = useState('')
   const [useConnectedWallet, setUseConnectedWallet] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
-  const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
-  const [txHash, setTxHash] = useState('')
+  const [withdrawAll, setWithdrawAll] = useState(false)
 
   // Fetch withdraw info when modal opens
   useEffect(() => {
@@ -57,6 +64,24 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
       resetForm()
     }
   }, [isOpen, connectedAddress])
+
+  // Handle transaction confirmation
+  useEffect(() => {
+    if (isConfirmed && hash) {
+      // Invalidate all relevant queries to refresh the entire dashboard
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['positions'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
+      queryClient.invalidateQueries({ queryKey: ['following'] })
+
+      // Call success callback after a delay
+      setTimeout(() => {
+        onSuccess?.()
+        onClose()
+      }, 3000)
+    }
+  }, [isConfirmed, hash, queryClient, onSuccess, onClose])
 
   const fetchWithdrawInfo = async () => {
     setIsLoading(true)
@@ -87,15 +112,19 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
     setRecipient(connectedAddress || '')
     setUseConnectedWallet(true)
     setError('')
-    setSuccess(false)
-    setTxHash('')
-    setIsExecuting(false)
+    setWithdrawAll(false)
   }
 
   const handleMaxClick = () => {
     if (withdrawInfo) {
-      setAmount(withdrawInfo.availableToWithdraw.toFixed(2))
+      setAmount(withdrawInfo.balance.toFixed(2))
+      setWithdrawAll(true)
     }
+  }
+
+  const handleAmountChange = (value: string) => {
+    setAmount(value)
+    setWithdrawAll(false) // Unset withdrawAll if user manually enters amount
   }
 
   const handleRecipientToggle = () => {
@@ -112,7 +141,7 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
   }
 
   const validateForm = (): string | null => {
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!withdrawAll && (!amount || parseFloat(amount) <= 0)) {
       return 'Please enter a valid amount'
     }
 
@@ -120,8 +149,8 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
       return 'Withdrawal information not loaded'
     }
 
-    if (parseFloat(amount) > withdrawInfo.availableToWithdraw) {
-      return `Maximum available to withdraw: $${withdrawInfo.availableToWithdraw.toFixed(2)}`
+    if (!withdrawAll && parseFloat(amount) > withdrawInfo.balance) {
+      return `Maximum available to withdraw: $${withdrawInfo.balance.toFixed(2)}`
     }
 
     if (!recipient || !ethers.isAddress(recipient)) {
@@ -130,6 +159,10 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
 
     if (!withdrawInfo.isAuthorized) {
       return 'Your wallet is not authorized to withdraw. Please contact support.'
+    }
+
+    if (!connectedAddress) {
+      return 'Please connect your wallet'
     }
 
     return null
@@ -142,61 +175,54 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
       return
     }
 
-    setIsExecuting(true)
+    if (!withdrawInfo || !connectedAddress) {
+      setError('Missing withdrawal information')
+      return
+    }
+
     setError('')
 
     try {
-      // First, prepare the withdrawal
-      const prepareResponse = await fetch('/api/wallet/prepare-withdraw', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: parseFloat(amount),
-          recipient,
-        }),
-      })
+      if (withdrawAll) {
+        // Call withdrawAllTokens
+        console.log('[WithdrawModal] Calling withdrawAllTokens', {
+          safe: withdrawInfo.safeAddress,
+          token: USDC_E_ADDRESS,
+        })
 
-      const prepareData = await prepareResponse.json()
+        writeContract({
+          address: USER_WITHDRAWAL_MODULE as `0x${string}`,
+          abi: USER_WITHDRAWAL_MODULE_ABI,
+          functionName: 'withdrawAllTokens',
+          args: [
+            withdrawInfo.safeAddress as `0x${string}`,
+            USDC_E_ADDRESS as `0x${string}`,
+          ],
+        })
+      } else {
+        // Call withdrawToken with specific amount
+        const amountInUnits = parseUnits(amount, 6) // USDC.e has 6 decimals
 
-      if (!prepareResponse.ok) {
-        throw new Error(prepareData.error || 'Failed to prepare withdrawal')
+        console.log('[WithdrawModal] Calling withdrawToken', {
+          safe: withdrawInfo.safeAddress,
+          token: USDC_E_ADDRESS,
+          amount: amountInUnits.toString(),
+        })
+
+        writeContract({
+          address: USER_WITHDRAWAL_MODULE as `0x${string}`,
+          abi: USER_WITHDRAWAL_MODULE_ABI,
+          functionName: 'withdrawToken',
+          args: [
+            withdrawInfo.safeAddress as `0x${string}`,
+            USDC_E_ADDRESS as `0x${string}`,
+            amountInUnits,
+          ],
+        })
       }
-
-      // Execute the withdrawal
-      const executeResponse = await fetch('/api/wallet/execute-withdraw', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: parseFloat(amount),
-          recipient,
-        }),
-      })
-
-      const executeData = await executeResponse.json()
-
-      if (!executeResponse.ok) {
-        throw new Error(executeData.error || 'Failed to execute withdrawal')
-      }
-
-      setSuccess(true)
-      setTxHash(executeData.transactionHash)
-
-      // Invalidate all relevant queries to refresh the entire dashboard
-      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['positions'] })
-      queryClient.invalidateQueries({ queryKey: ['trades'] })
-      queryClient.invalidateQueries({ queryKey: ['activity'] })
-      queryClient.invalidateQueries({ queryKey: ['following'] })
-
-      // Call success callback after a delay
-      setTimeout(() => {
-        onSuccess?.()
-        onClose()
-      }, 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process withdrawal')
-    } finally {
-      setIsExecuting(false)
+      console.error('[WithdrawModal] Error initiating withdrawal:', err)
+      setError(err instanceof Error ? err.message : 'Failed to initiate withdrawal')
     }
   }
 
@@ -209,7 +235,7 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
       )
     }
 
-    if (success) {
+    if (isConfirmed && hash) {
       return (
         <div className="space-y-4 py-6">
           <div className="flex flex-col items-center gap-4 text-center">
@@ -217,19 +243,17 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
             <div>
               <h3 className="font-semibold text-lg">Withdrawal Successful!</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                ${parseFloat(amount).toFixed(2)} USDC.e sent to {recipient.slice(0, 6)}...{recipient.slice(-4)}
+                {withdrawAll ? 'All funds' : `$${parseFloat(amount).toFixed(2)} USDC.e`} sent to {recipient.slice(0, 6)}...{recipient.slice(-4)}
               </p>
             </div>
-            {txHash && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`https://polygonscan.com/tx/${txHash}`, '_blank')}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View on PolygonScan
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`https://polygonscan.com/tx/${hash}`, '_blank')}
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              View on PolygonScan
+            </Button>
           </div>
         </div>
       )
@@ -246,20 +270,18 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
     return (
       <div className="space-y-4 py-4">
         {/* Balance Info */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-xs text-muted-foreground mb-1">Total Balance</div>
-            <div className="font-semibold">${withdrawInfo.balance.toFixed(2)}</div>
+        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+          <div className="text-sm text-muted-foreground mb-1">Total Balance</div>
+          <div className="text-2xl font-semibold text-green-600 dark:text-green-500">
+            ${withdrawInfo.balance.toFixed(2)}
           </div>
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-xs text-muted-foreground mb-1">Locked</div>
-            <div className="font-semibold">${withdrawInfo.lockedFunds.toFixed(2)}</div>
-          </div>
-          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-            <div className="text-xs text-muted-foreground mb-1">Available</div>
-            <div className="font-semibold text-green-600 dark:text-green-500">
-              ${withdrawInfo.availableToWithdraw.toFixed(2)}
-            </div>
+        </div>
+
+        {/* Gas Fee Notice */}
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex gap-2">
+          <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+          <div className="text-xs text-muted-foreground">
+            You will need MATIC in your wallet to pay for gas fees (approximately $0.01-0.05 per withdrawal)
           </div>
         </div>
 
@@ -289,21 +311,26 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
                 type="number"
                 placeholder="0.00"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => handleAmountChange(e.target.value)}
                 min="0.01"
                 step="0.01"
                 className="pl-6"
-                disabled={isExecuting || !withdrawInfo.isAuthorized}
+                disabled={isPending || isConfirming || !withdrawInfo.isAuthorized}
               />
             </div>
             <Button
               variant="outline"
               onClick={handleMaxClick}
-              disabled={isExecuting || !withdrawInfo.isAuthorized}
+              disabled={isPending || isConfirming || !withdrawInfo.isAuthorized}
             >
               Max
             </Button>
           </div>
+          {withdrawAll && (
+            <p className="text-xs text-muted-foreground">
+              Withdrawing all available funds
+            </p>
+          )}
         </div>
 
         {/* Recipient Input */}
@@ -314,7 +341,7 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
               type="button"
               onClick={handleRecipientToggle}
               className="text-xs text-primary hover:underline"
-              disabled={isExecuting}
+              disabled={isPending || isConfirming}
             >
               {useConnectedWallet ? 'Use custom address' : 'Use connected wallet'}
             </button>
@@ -325,7 +352,7 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
             placeholder="0x..."
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
-            disabled={isExecuting || useConnectedWallet || !withdrawInfo.isAuthorized}
+            disabled={isPending || isConfirming || useConnectedWallet || !withdrawInfo.isAuthorized}
             className="font-mono text-sm"
           />
           {useConnectedWallet && connectedAddress && (
@@ -336,10 +363,23 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
         </div>
 
         {/* Error Message */}
-        {error && (
+        {(error || writeError) && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex gap-2">
             <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-            <div className="text-sm text-red-600 dark:text-red-500">{error}</div>
+            <div className="text-sm text-red-600 dark:text-red-500">
+              {error || (writeError as Error)?.message || 'Transaction failed'}
+            </div>
+          </div>
+        )}
+
+        {/* Pending Transaction Status */}
+        {(isPending || isConfirming) && (
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex gap-2">
+            <Loader2 className="h-4 w-4 text-blue-500 shrink-0 mt-0.5 animate-spin" />
+            <div className="text-sm text-blue-600 dark:text-blue-500">
+              {isPending && 'Waiting for wallet confirmation...'}
+              {isConfirming && 'Transaction pending confirmation...'}
+            </div>
           </div>
         )}
       </div>
@@ -358,17 +398,23 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
 
         {renderContent()}
 
-        {!success && !isLoading && withdrawInfo && (
+        {!isConfirmed && !isLoading && withdrawInfo && (
           <DialogFooter>
-            <Button variant="outline" onClick={onClose} disabled={isExecuting}>
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={isPending || isConfirming}
+            >
               Cancel
             </Button>
             <Button
               onClick={handleWithdraw}
-              disabled={isExecuting || !withdrawInfo.isAuthorized}
+              disabled={isPending || isConfirming || !withdrawInfo.isAuthorized}
             >
-              {isExecuting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {isExecuting ? 'Processing...' : 'Withdraw'}
+              {(isPending || isConfirming) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {isPending && 'Confirm in Wallet...'}
+              {isConfirming && 'Confirming...'}
+              {!isPending && !isConfirming && 'Withdraw'}
             </Button>
           </DialogFooter>
         )}
