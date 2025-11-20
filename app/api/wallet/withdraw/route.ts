@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import prisma from '@/lib/db/prisma'
-import { tradeModuleV3 } from '@/lib/contracts/trade-module-v3'
+import { verifySecuritySetup } from '@/lib/contracts/safe-security-setup'
 import { ethers } from 'ethers'
+
+const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' // USDC.e (Bridged USDC for Polymarket)
 
 /**
  * POST /api/wallet/withdraw
@@ -59,11 +61,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid recipient address' }, { status: 400 })
     }
 
-    // Check Safe balance
-    const balance = await tradeModuleV3.getSafeBalance(user.safeAddress)
+    // Check Safe USDC.e balance
+    const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL)
+    const usdcEContract = new ethers.Contract(
+      USDC_E_ADDRESS,
+      ['function balanceOf(address) view returns (uint256)'],
+      provider
+    )
+    const balanceWei = await usdcEContract.balanceOf(user.safeAddress)
+    const balance = parseFloat(ethers.formatUnits(balanceWei, 6))
+
     if (balance < amount) {
       return NextResponse.json(
-        { error: `Insufficient balance. Available: ${balance.toFixed(2)} USDC` },
+        { error: `Insufficient balance. Available: ${balance.toFixed(2)} USDC.e` },
         { status: 400 }
       )
     }
@@ -202,8 +212,29 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Get Safe balance
-    const balance = await tradeModuleV3.getSafeBalance(user.safeAddress)
+    if (!user.walletAddress) {
+      return NextResponse.json(
+        { error: 'User wallet address not found' },
+        { status: 404 }
+      )
+    }
+
+    // Check if user is authorized to withdraw
+    const securitySetup = await verifySecuritySetup(
+      user.safeAddress,
+      user.walletAddress
+    )
+
+    // Get Safe USDC.e balance (bridged USDC for Polymarket)
+    const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL)
+    const usdcEContract = new ethers.Contract(
+      USDC_E_ADDRESS,
+      ['function balanceOf(address) view returns (uint256)'],
+      provider
+    )
+    const balanceWei = await usdcEContract.balanceOf(user.safeAddress)
+    const balance = parseFloat(ethers.formatUnits(balanceWei, 6))
+    console.log('[GET /api/wallet/withdraw] Safe USDC.e balance:', balance, 'for Safe:', user.safeAddress)
 
     // Get open positions to calculate locked funds
     const openPositions = await prisma.position.findMany({
@@ -219,12 +250,20 @@ export async function GET(req: NextRequest) {
     const lockedFunds = openPositions.reduce((sum, pos) => sum + pos.value, 0)
     const availableToWithdraw = Math.max(0, balance - lockedFunds)
 
+    console.log('[GET /api/wallet/withdraw] Returning:', {
+      balance,
+      lockedFunds,
+      availableToWithdraw,
+      isAuthorized: securitySetup.isComplete && securitySetup.userAuthorized,
+    })
+
     return NextResponse.json({
       safeAddress: user.safeAddress,
       balance,
       lockedFunds,
       availableToWithdraw,
       defaultRecipient: user.walletAddress,
+      isAuthorized: securitySetup.isComplete && securitySetup.userAuthorized,
     })
   } catch (error: any) {
     console.error('GET /api/wallet/withdraw error:', error)

@@ -58,6 +58,8 @@ export async function GET(req: NextRequest) {
     let balance = 0
     let nativeUsdcBalance = 0
     let hasWrongToken = false
+    let operatorAddress: string | null = null
+    let operatorPolBalance = 0
 
     if (safeStatus === 'deployed' && safeAddress) {
       const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL!)
@@ -81,6 +83,14 @@ export async function GET(req: NextRequest) {
       nativeUsdcBalance = parseFloat(ethers.formatUnits(nativeBalanceWei, 6))
 
       hasWrongToken = nativeUsdcBalance > 0 && balance === 0
+
+      // Get operator wallet address and balance
+      if (user.walletAddress) {
+        const operatorWallet = deriveOperatorWallet(user.walletAddress)
+        operatorAddress = operatorWallet.address
+        const operatorBalanceWei = await provider.getBalance(operatorAddress)
+        operatorPolBalance = parseFloat(ethers.formatEther(operatorBalanceWei))
+      }
     }
 
     return NextResponse.json({
@@ -89,6 +99,8 @@ export async function GET(req: NextRequest) {
       balance, // USDC.e balance (correct)
       nativeUsdcBalance, // Native USDC balance (wrong token!)
       hasWrongToken, // Warning flag
+      operatorAddress,
+      operatorPolBalance,
       usdcEAddress: USDC_E_ADDRESS,
       nativeUsdcAddress: NATIVE_USDC_ADDRESS,
       network: 'Polygon',

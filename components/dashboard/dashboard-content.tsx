@@ -10,7 +10,9 @@ import { RecentTrades } from '@/components/dashboard/recent-trades'
 import { ActivePositions } from '@/components/dashboard/active-positions'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { OnboardingModal } from '@/components/onboarding/onboarding-modal'
-import { Copy, CheckCircle2, ExternalLink } from 'lucide-react'
+import { DepositModal } from '@/components/dashboard/deposit-modal'
+import { WithdrawModal } from '@/components/dashboard/withdraw-modal'
+import { Copy, CheckCircle2, ExternalLink, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react'
 
 interface WalletInfo {
   safeAddress: string | null
@@ -21,6 +23,8 @@ export function DashboardContent() {
   const { data: session, status, update: updateSession } = useSession()
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null)
   const [copied, setCopied] = useState(false)
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false)
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false)
 
   // Fetch wallet info when authenticated
   useEffect(() => {
@@ -115,38 +119,27 @@ export function DashboardContent() {
         {walletInfo?.safeAddress && (
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-sm text-muted-foreground">Balance</div>
+              <div className="text-sm text-muted-foreground">Safe Balance</div>
               <div className="text-2xl font-bold">${walletInfo.balance.toFixed(2)}</div>
             </div>
             <div className="h-12 w-px bg-border" />
-            <div>
-              <div className="text-sm text-muted-foreground mb-1">Deposit to Safe Wallet</div>
-              <div className="flex items-center gap-2">
-                <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
-                  {truncateAddress(walletInfo.safeAddress)}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={copyAddress}
-                  className="h-7 w-7 p-0"
-                >
-                  {copied ? (
-                    <CheckCircle2 className="h-3 w-3 text-green-600" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => window.open(`https://app.safe.global/home?safe=matic:${walletInfo.safeAddress}`, '_blank')}
-                  className="h-7 w-7 p-0"
-                  title="Open in Safe App"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </Button>
-              </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setIsDepositModalOpen(true)}
+              >
+                <ArrowDownToLine className="h-4 w-4 mr-2" />
+                Deposit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsWithdrawModalOpen(true)}
+              >
+                <ArrowUpFromLine className="h-4 w-4 mr-2" />
+                Withdraw
+              </Button>
             </div>
           </div>
         )}
@@ -168,6 +161,25 @@ export function DashboardContent() {
       <div className="mb-8">
         <ActivityFeed />
       </div>
+
+      {/* Modals */}
+      {walletInfo?.safeAddress && (
+        <>
+          <DepositModal
+            isOpen={isDepositModalOpen}
+            onClose={() => setIsDepositModalOpen(false)}
+            safeAddress={walletInfo.safeAddress}
+            balance={walletInfo.balance}
+          />
+          <WithdrawModal
+            isOpen={isWithdrawModalOpen}
+            onClose={() => setIsWithdrawModalOpen(false)}
+            onSuccess={() => {
+              fetchWalletInfo() // Refresh balance after withdrawal
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }
