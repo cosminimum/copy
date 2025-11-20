@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { Plus, Copy } from 'lucide-react'
+import { Plus, Copy, Settings, UserMinus } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { AddTraderDialog } from './add-trader-dialog'
+import { EditCopySettingsDialog } from './edit-copy-settings-dialog'
 
 interface Following {
   trader: {
@@ -45,6 +46,8 @@ export function FollowingSection() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [traderToUnfollow, setTraderToUnfollow] = useState<Following | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [traderToEdit, setTraderToEdit] = useState<Following | null>(null)
   const { toast } = useToast()
 
   // Load following list when component mounts and session is available
@@ -77,6 +80,11 @@ export function FollowingSection() {
   const handleUnfollowClick = (trader: Following) => {
     setTraderToUnfollow(trader)
     setShowConfirmDialog(true)
+  }
+
+  const handleEditClick = (trader: Following) => {
+    setTraderToEdit(trader)
+    setShowEditDialog(true)
   }
 
   const handleCopyAddress = async (address: string) => {
@@ -209,15 +217,27 @@ export function FollowingSection() {
                       alt={item.trader.name || 'Trader'}
                       className="w-12 h-12 rounded-full"
                     />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleUnfollowClick(item)}
-                      disabled={unfollowingWallet === item.trader.walletAddress}
-                      className="h-8 px-2 text-xs"
-                    >
-                      {unfollowingWallet === item.trader.walletAddress ? 'Unfollowing...' : 'Unfollow'}
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEditClick(item)}
+                        className="h-8 px-2 text-xs"
+                      >
+                        <Settings className="h-3 w-3 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleUnfollowClick(item)}
+                        disabled={unfollowingWallet === item.trader.walletAddress}
+                        className="h-8 px-2 text-xs"
+                      >
+                        <UserMinus className="h-3 w-3 mr-1" />
+                        {unfollowingWallet === item.trader.walletAddress ? 'Unfollowing...' : 'Unfollow'}
+                      </Button>
+                    </div>
                   </div>
                   <CardTitle className="text-base truncate">
                     <a
@@ -292,6 +312,7 @@ export function FollowingSection() {
                   {/* Copy Settings */}
                   {item.settings && (
                     <div className="border-t pt-3">
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Copy Settings</p>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
                           <p className="text-muted-foreground">Multiplier</p>
@@ -345,6 +366,16 @@ export function FollowingSection() {
         onOpenChange={setShowAddDialog}
         onSuccess={loadFollowing}
       />
+
+      {traderToEdit && (
+        <EditCopySettingsDialog
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          traderWalletAddress={traderToEdit.trader.walletAddress}
+          traderName={traderToEdit.trader.name || `${traderToEdit.trader.walletAddress.slice(0, 6)}...${traderToEdit.trader.walletAddress.slice(-4)}`}
+          onSuccess={loadFollowing}
+        />
+      )}
     </>
   )
 }

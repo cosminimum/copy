@@ -4,6 +4,48 @@ import prisma from '@/lib/db/prisma'
 import { isValidWalletAddress } from '@/lib/polymarket/api-client'
 
 /**
+ * Get copy trading settings for a specific trader or global settings
+ * GET /api/copy-settings?traderAddress=<address>&isGlobal=<bool>
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const session = await auth()
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const traderAddress = searchParams.get('traderAddress')
+    const isGlobal = searchParams.get('isGlobal') === 'true'
+
+    // Validate wallet address if provided
+    if (traderAddress && !isValidWalletAddress(traderAddress)) {
+      return NextResponse.json(
+        { error: 'Invalid wallet address format' },
+        { status: 400 }
+      )
+    }
+
+    const settings = await prisma.copySetting.findFirst({
+      where: {
+        userId: session.user.id,
+        traderWalletAddress: traderAddress || null,
+        isGlobal: isGlobal,
+      },
+    })
+
+    return NextResponse.json({ settings })
+  } catch (error) {
+    console.error('Error fetching copy settings:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch copy settings' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
  * Create or update copy trading settings
  * POST /api/copy-settings
  * Body: { walletAddress?, isGlobal?, positionSizeType, positionSizeValue, maxPositionSize?, minTradeSize?, ... }
