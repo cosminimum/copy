@@ -59,19 +59,23 @@ export async function GET(request: NextRequest) {
           },
         })
 
-        // Calculate total PnL for trades from this trader
-        const totalPnL = completedTrades.reduce((sum, t) => {
-          const position = positions.find(p => p.market === t.market && p.asset === t.asset)
-          return sum + (position?.realizedPnL || 0)
-        }, 0)
+        // Calculate realized PnL from closed positions
+        const realizedPnL = positions
+          .filter(p => p.status === 'CLOSED')
+          .reduce((sum, p) => sum + (p.realizedPnL || 0), 0)
 
-        // Calculate win rate
-        const profitableTrades = completedTrades.filter(t => {
-          const position = positions.find(p => p.market === t.market && p.asset === t.asset)
-          return position && position.realizedPnL > 0
-        }).length
+        // Calculate unrealized PnL from open positions
+        const unrealizedPnL = positions
+          .filter(p => p.status === 'OPEN')
+          .reduce((sum, p) => sum + (p.unrealizedPnL || 0), 0)
 
-        const winRate = totalTrades > 0 ? profitableTrades / totalTrades : 0
+        // Total PnL includes both realized and unrealized
+        const totalPnL = realizedPnL + unrealizedPnL
+
+        // Calculate win rate (based on closed positions only)
+        const closedPositions = positions.filter(p => p.status === 'CLOSED')
+        const profitableClosedPositions = closedPositions.filter(p => (p.realizedPnL || 0) > 0).length
+        const winRate = closedPositions.length > 0 ? profitableClosedPositions / closedPositions.length : 0
 
         // Get copy settings for this trader
         const copySettings = await prisma.copySetting.findFirst({

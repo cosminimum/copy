@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -15,41 +15,26 @@ interface PortfolioStats {
   followingCount: number
 }
 
-export function PortfolioStats() {
-  const { data: session, status } = useSession()
-  const [stats, setStats] = useState<PortfolioStats | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  // Load stats when authenticated
-  useEffect(() => {
-    if (status === 'authenticated') {
-      loadStats()
-    }
-  }, [status])
-
-  // Clear state when session ends
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      setStats(null)
-      setLoading(false)
-    }
-  }, [status])
-
-  const loadStats = async () => {
-    try {
-      const response = await fetch('/api/dashboard/stats')
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
-    } catch (error) {
-      console.error('Error loading stats:', error)
-    } finally {
-      setLoading(false)
-    }
+async function fetchDashboardStats(): Promise<PortfolioStats> {
+  const response = await fetch('/api/dashboard/stats')
+  if (!response.ok) {
+    throw new Error('Failed to fetch dashboard stats')
   }
+  return response.json()
+}
 
-  if (loading || status === 'loading') {
+export function PortfolioStats() {
+  const { status } = useSession()
+
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: fetchDashboardStats,
+    enabled: status === 'authenticated',
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds
+    staleTime: 30 * 1000, // Consider data stale after 30 seconds
+  })
+
+  if (isLoading || status === 'loading') {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (

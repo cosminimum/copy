@@ -267,7 +267,9 @@ export class TradeOrchestrator {
           data: {
             size: newSize,
             entryPrice: newAvgPrice,
+            currentPrice: trade.price,
             value: newSize * trade.price,
+            unrealizedPnL: (trade.price - newAvgPrice) * newSize,
           },
         })
       }

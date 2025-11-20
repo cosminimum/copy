@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "websocket:start": "tsx scripts/websocket-listener.ts"
+    "websocket:start": "tsx scripts/websocket-listener.ts",
+    "price-updater:start": "tsx scripts/update-position-prices.ts"
   },
   "dependencies": {
     "@polymarket/builder-relayer-client": "^0.0.6",

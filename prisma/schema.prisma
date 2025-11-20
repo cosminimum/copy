@@ -247,3 +247,26 @@ model OperatorCredential {
   @@index([operatorAddress])
   @@map("operator_credentials")
 }
+
+model FundingSession {
+  id                String   @id @default(cuid())
+  userAddress       String
+  operatorAddress   String
+  safeAddress       String
+  usdcAmount        String
+  status            String   @default("PENDING")
+  lastStep          Int      @default(0)
+  quoteData         Json?
+  txHashes          Json?
+  finalBalances     Json?
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  completedAt       DateTime?
+
+  @@index([userAddress])
+  @@index([operatorAddress])
+  @@index([status])
+  @@index([createdAt])
+  @@map("funding_sessions")
+}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ interface WithdrawInfo {
 
 export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps) {
   const { address: connectedAddress } = useAccount()
+  const queryClient = useQueryClient()
 
   const [withdrawInfo, setWithdrawInfo] = useState<WithdrawInfo | null>(null)
   const [amount, setAmount] = useState('')
@@ -178,6 +180,13 @@ export function WithdrawModal({ isOpen, onClose, onSuccess }: WithdrawModalProps
 
       setSuccess(true)
       setTxHash(executeData.transactionHash)
+
+      // Invalidate all relevant queries to refresh the entire dashboard
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['positions'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
+      queryClient.invalidateQueries({ queryKey: ['following'] })
 
       // Call success callback after a delay
       setTimeout(() => {

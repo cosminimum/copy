@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +34,7 @@ export function EditCopySettingsDialog({
   traderName,
   onSuccess,
 }: EditCopySettingsDialogProps) {
+  const queryClient = useQueryClient()
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [positionSizeType, setPositionSizeType] = useState<string>('PROPORTIONAL')
@@ -124,6 +126,13 @@ export function EditCopySettingsDialog({
         title: 'Success!',
         description: `Updated copy settings for ${traderName}`,
       })
+
+      // Invalidate all relevant queries to refresh the entire dashboard
+      queryClient.invalidateQueries({ queryKey: ['following'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['positions'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
 
       onOpenChange(false)
       onSuccess?.()

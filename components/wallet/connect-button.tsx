@@ -15,7 +15,7 @@ export function ConnectButton() {
   const { connect, connectors } = useConnect()
   const { disconnect } = useDisconnect()
   const { signMessageAsync } = useSignMessage()
-  const { data: session } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const { toast } = useToast()
   const { data: connectorClient } = useConnectorClient()
 
@@ -144,13 +144,20 @@ export function ConnectButton() {
       isConnected,
       hasAddress: !!address,
       hasSession: !!session,
+      sessionStatus,
       isSigning,
       hasConnectorClient: !!connectorClient,
       signingAttempted: signingAttemptedRef.current
     })
 
-    // Only auto-sign if all conditions are met
-    if (mounted && isConnected && address && !session && !isSigning) {
+    // Don't auto-sign if session is still loading - wait for it to resolve
+    if (sessionStatus === 'loading') {
+      console.log('Session still loading, waiting...')
+      return
+    }
+
+    // Only auto-sign if all conditions are met and session check is complete
+    if (mounted && isConnected && address && !session && !isSigning && sessionStatus === 'unauthenticated') {
       // If connectorClient is ready, sign immediately
       if (connectorClient) {
         console.log('Triggering auto-sign from useEffect (with connectorClient)')
@@ -167,7 +174,7 @@ export function ConnectButton() {
         return () => clearTimeout(timeout)
       }
     }
-  }, [mounted, isConnected, address, session, connectorClient, isSigning, handleSignIn])
+  }, [mounted, isConnected, address, session, sessionStatus, connectorClient, isSigning, handleSignIn])
 
   if (!mounted) {
     return (

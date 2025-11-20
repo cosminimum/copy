@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     // Calculate expected balances based on USDC amount
     console.log('[verify-funding] Calculating expected balances...');
-    const expectedBalances = await calculateExpectedBalances(usdcAmount, provider);
+    const expectedBalances = await calculateExpectedBalances(parseFloat(usdcAmount), provider);
 
     // Verify that user completed all transfers
     console.log('[verify-funding] Verifying funding completion...');

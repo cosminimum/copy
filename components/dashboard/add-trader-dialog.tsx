@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +29,7 @@ interface AddTraderDialogProps {
 }
 
 export function AddTraderDialog({ open, onOpenChange, onSuccess }: AddTraderDialogProps) {
+  const queryClient = useQueryClient()
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<PolymarketProfile[]>([])
@@ -141,6 +143,13 @@ export function AddTraderDialog({ open, onOpenChange, onSuccess }: AddTraderDial
         title: 'Success!',
         description: `Now following ${selectedTrader.name || selectedTrader.pseudonym || 'trader'}`,
       })
+
+      // Invalidate all relevant queries to refresh the entire dashboard
+      queryClient.invalidateQueries({ queryKey: ['following'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['positions'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
 
       // Reset and close
       setSelectedTrader(null)

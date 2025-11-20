@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,10 +39,18 @@ interface Following {
   } | null
 }
 
+async function fetchFollowing(): Promise<Following[]> {
+  const response = await fetch('/api/following')
+  if (!response.ok) {
+    throw new Error('Failed to fetch following')
+  }
+  const data = await response.json()
+  return data.following || []
+}
+
 export function FollowingSection() {
-  const { data: session, status } = useSession()
-  const [following, setFollowing] = useState<Following[]>([])
-  const [loading, setLoading] = useState(true)
+  const { status } = useSession()
+  const queryClient = useQueryClient()
   const [unfollowingWallet, setUnfollowingWallet] = useState<string | null>(null)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [traderToUnfollow, setTraderToUnfollow] = useState<Following | null>(null)
@@ -50,31 +59,21 @@ export function FollowingSection() {
   const [traderToEdit, setTraderToEdit] = useState<Following | null>(null)
   const { toast } = useToast()
 
-  // Load following list when component mounts and session is available
-  useEffect(() => {
-    if (status === 'authenticated') {
-      loadFollowing()
-    }
-  }, [status])
+  const { data: following = [], isLoading: loading } = useQuery({
+    queryKey: ['following'],
+    queryFn: fetchFollowing,
+    enabled: status === 'authenticated',
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds
+    staleTime: 30 * 1000,
+  })
 
-  // Clear state when session ends
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      setFollowing([])
-      setLoading(false)
-    }
-  }, [status])
-
-  const loadFollowing = async () => {
-    try {
-      const response = await fetch('/api/following')
-      const data = await response.json()
-      setFollowing(data.following || [])
-    } catch (error) {
-      console.error('Error loading following:', error)
-    } finally {
-      setLoading(false)
-    }
+  const loadFollowing = () => {
+    // Invalidate all relevant queries to refresh the entire dashboard
+    queryClient.invalidateQueries({ queryKey: ['following'] })
+    queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+    queryClient.invalidateQueries({ queryKey: ['positions'] })
+    queryClient.invalidateQueries({ queryKey: ['trades'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
   }
 
   const handleUnfollowClick = (trader: Following) => {
@@ -123,6 +122,13 @@ export function FollowingSection() {
         title: 'Unfollowed',
         description: `You've stopped copying ${traderToUnfollow.trader.name || 'this trader'}`,
       })
+
+      // Invalidate all relevant queries to refresh the entire dashboard
+      queryClient.invalidateQueries({ queryKey: ['following'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['positions'] })
+      queryClient.invalidateQueries({ queryKey: ['trades'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
 
       await loadFollowing()
     } catch (error) {

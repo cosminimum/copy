@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
 const MIN_OPERATOR_BALANCE = 0.1 // Minimum POL balance for operator
 
 export function DepositModal({ isOpen, onClose, safeAddress, balance }: DepositModalProps) {
+  const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
   const [tokenAddressCopied, setTokenAddressCopied] = useState(false)
   const [operatorAddressCopied, setOperatorAddressCopied] = useState(false)
@@ -62,11 +64,26 @@ export function DepositModal({ isOpen, onClose, safeAddress, balance }: DepositM
   useEffect(() => {
     if (!isOpen) return
 
+    let previousBalance = currentBalance
+
     const pollBalance = async () => {
       try {
         const response = await fetch('/api/wallet/deposit')
         if (response.ok) {
           const data = await response.json()
+
+          // Check if balance changed
+          const balanceChanged = data.balance !== previousBalance
+          if (balanceChanged) {
+            // Invalidate all relevant queries to refresh the entire dashboard
+            queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+            queryClient.invalidateQueries({ queryKey: ['positions'] })
+            queryClient.invalidateQueries({ queryKey: ['trades'] })
+            queryClient.invalidateQueries({ queryKey: ['activity'] })
+            queryClient.invalidateQueries({ queryKey: ['following'] })
+            previousBalance = data.balance
+          }
+
           setCurrentBalance(data.balance)
 
           // Update operator info
@@ -108,7 +125,7 @@ export function DepositModal({ isOpen, onClose, safeAddress, balance }: DepositM
     pollBalance()
 
     return () => clearInterval(interval)
-  }, [isOpen])
+  }, [isOpen, queryClient])
 
   const handleCopyAddress = async () => {
     try {

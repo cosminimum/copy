@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -15,39 +15,25 @@ interface Trade {
   status: string
 }
 
-export function RecentTrades() {
-  const { data: session, status } = useSession()
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [loading, setLoading] = useState(true)
-
-  // Load trades when authenticated
-  useEffect(() => {
-    if (status === 'authenticated') {
-      loadTrades()
-    }
-  }, [status])
-
-  // Clear state when session ends
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      setTrades([])
-      setLoading(false)
-    }
-  }, [status])
-
-  const loadTrades = async () => {
-    try {
-      const response = await fetch('/api/dashboard/trades')
-      if (response.ok) {
-        const data = await response.json()
-        setTrades(data.trades || [])
-      }
-    } catch (error) {
-      console.error('Error loading trades:', error)
-    } finally {
-      setLoading(false)
-    }
+async function fetchTrades(): Promise<Trade[]> {
+  const response = await fetch('/api/dashboard/trades')
+  if (!response.ok) {
+    throw new Error('Failed to fetch trades')
   }
+  const data = await response.json()
+  return data.trades || []
+}
+
+export function RecentTrades() {
+  const { status } = useSession()
+
+  const { data: trades = [], isLoading: loading } = useQuery({
+    queryKey: ['trades'],
+    queryFn: fetchTrades,
+    enabled: status === 'authenticated',
+    refetchInterval: 30 * 1000,
+    staleTime: 30 * 1000,
+  })
 
   if (loading || status === 'loading') {
     return (

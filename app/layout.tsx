@@ -3,6 +3,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { Web3Provider } from "@/components/providers/web3-provider"
 import { SessionProvider } from "@/components/providers/session-provider"
+import { QueryProvider } from "@/components/providers/query-provider"
 import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -21,10 +22,12 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={inter.className}>
         <SessionProvider>
-          <Web3Provider>
-            {children}
-            <Toaster />
-          </Web3Provider>
+          <QueryProvider>
+            <Web3Provider>
+              {children}
+              <Toaster />
+            </Web3Provider>
+          </QueryProvider>
         </SessionProvider>
       </body>
     </html>

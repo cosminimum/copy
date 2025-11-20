@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -11,39 +11,25 @@ interface ActivityLog {
   createdAt: Date
 }
 
-export function ActivityFeed() {
-  const { data: session, status } = useSession()
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
-  const [loading, setLoading] = useState(true)
-
-  // Load activity when authenticated
-  useEffect(() => {
-    if (status === 'authenticated') {
-      loadActivity()
-    }
-  }, [status])
-
-  // Clear state when session ends
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      setActivityLogs([])
-      setLoading(false)
-    }
-  }, [status])
-
-  const loadActivity = async () => {
-    try {
-      const response = await fetch('/api/dashboard/activity')
-      if (response.ok) {
-        const data = await response.json()
-        setActivityLogs(data.activityLogs || [])
-      }
-    } catch (error) {
-      console.error('Error loading activity:', error)
-    } finally {
-      setLoading(false)
-    }
+async function fetchActivity(): Promise<ActivityLog[]> {
+  const response = await fetch('/api/dashboard/activity')
+  if (!response.ok) {
+    throw new Error('Failed to fetch activity')
   }
+  const data = await response.json()
+  return data.activityLogs || []
+}
+
+export function ActivityFeed() {
+  const { status } = useSession()
+
+  const { data: activityLogs = [], isLoading: loading } = useQuery({
+    queryKey: ['activity'],
+    queryFn: fetchActivity,
+    enabled: status === 'authenticated',
+    refetchInterval: 30 * 1000,
+    staleTime: 30 * 1000,
+  })
 
   if (loading || status === 'loading') {
     return (
