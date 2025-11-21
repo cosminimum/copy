@@ -114,11 +114,30 @@ export class TradeOrchestrator {
       const userBalance = await this.getUserBalance(userId)
       this.log('debug', `User balance: $${userBalance.toFixed(2)}`)
 
+      // For SELL orders, get user's current position to ensure they have shares to sell
+      let userPosition = null
+      if (originalTrade.side === 'SELL') {
+        userPosition = await prisma.position.findFirst({
+          where: {
+            userId,
+            market: originalTrade.slug,
+            asset: originalTrade.asset,
+            outcome: originalTrade.outcome,
+            status: 'OPEN',
+          },
+          select: {
+            size: true,
+          },
+        })
+        this.log('debug', `User position for ${originalTrade.outcome}: ${userPosition?.size || 0} shares`)
+      }
+
       // Calculate trade size
       const calculatedTrade = positionCalculator.calculateTradeSize(
         originalTrade,
         copySettings as CopySettings,
-        userBalance
+        userBalance,
+        userPosition
       )
 
       if (!calculatedTrade) {

@@ -25,25 +25,59 @@ export class PositionCalculator {
   calculateTradeSize(
     originalTrade: TradeMessage,
     settings: CopySettings,
-    userBalance: number
+    userBalance: number,
+    userPosition?: { size: number } | null
   ): CalculatedTrade | null {
     let calculatedSize = 0
 
-    switch (settings.positionSizeType) {
-      case 'PERCENTAGE':
-        calculatedSize = (userBalance * settings.positionSizeValue) / 100
-        break
-
-      case 'PROPORTIONAL':
-        calculatedSize = originalTrade.size * settings.positionSizeValue
-        break
-
-      case 'FIXED':
-        calculatedSize = settings.positionSizeValue
-        break
-
-      default:
+    // For SELL orders, check if user has a position to sell
+    if (originalTrade.side === 'SELL') {
+      if (!userPosition || userPosition.size <= 0) {
+        console.log(`[PositionCalculator] Cannot SELL - user has no position for ${originalTrade.outcome} in ${originalTrade.slug}`)
         return null
+      }
+
+      // Calculate sell size based on settings (same logic as BUY)
+      switch (settings.positionSizeType) {
+        case 'PERCENTAGE':
+          calculatedSize = (userBalance * settings.positionSizeValue) / 100
+          break
+
+        case 'PROPORTIONAL':
+          calculatedSize = originalTrade.size * settings.positionSizeValue
+          break
+
+        case 'FIXED':
+          calculatedSize = settings.positionSizeValue
+          break
+
+        default:
+          return null
+      }
+
+      // CRITICAL: Cap sell size to what user actually owns
+      if (calculatedSize > userPosition.size) {
+        console.log(`[PositionCalculator] SELL size ${calculatedSize} exceeds position ${userPosition.size}, capping to position size`)
+        calculatedSize = userPosition.size
+      }
+    } else {
+      // BUY order - use normal calculation
+      switch (settings.positionSizeType) {
+        case 'PERCENTAGE':
+          calculatedSize = (userBalance * settings.positionSizeValue) / 100
+          break
+
+        case 'PROPORTIONAL':
+          calculatedSize = originalTrade.size * settings.positionSizeValue
+          break
+
+        case 'FIXED':
+          calculatedSize = settings.positionSizeValue
+          break
+
+        default:
+          return null
+      }
     }
 
     if (settings.minTradeSize && calculatedSize < settings.minTradeSize) {
