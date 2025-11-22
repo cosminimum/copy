@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
+import { useRealtimePrices } from '@/hooks/use-realtime-prices'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -81,12 +82,16 @@ export function ActivePositions() {
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
 
+  // Connect to real-time price updates
+  const { connected: pricesConnected } = useRealtimePrices()
+
   const { data: positions = [], isLoading: loading } = useQuery({
     queryKey: ['positions'],
     queryFn: fetchPositions,
     enabled: status === 'authenticated',
-    refetchInterval: 30 * 1000, // Refetch every 30 seconds
-    staleTime: 30 * 1000,
+    // No polling needed - real-time updates via SSE
+    refetchInterval: false,
+    staleTime: Infinity,
   })
 
   const { data: closeEstimate, isLoading: loadingEstimate } = useQuery({
@@ -158,7 +163,12 @@ export function ActivePositions() {
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Active Positions</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Active Positions
+            {pricesConnected && (
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" title="Live prices" />
+            )}
+          </CardTitle>
           <CardDescription>Your current open positions</CardDescription>
         </CardHeader>
         <CardContent className="max-h-[400px] overflow-y-auto">

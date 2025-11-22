@@ -15,12 +15,11 @@
  *   3. Configure copy settings for each followed trader
  */
 
-import { PrismaClient } from '@prisma/client'
+import prisma from '../lib/db/prisma.js'
 import { PolymarketWebSocketService } from '../lib/polymarket/websocket-client.js'
 import { TradeOrchestrator } from '../lib/orchestration/trade-orchestrator.js'
+import { realtimePriceService } from '../lib/services/realtime-price-service.js'
 import { TradeMessage } from '../lib/polymarket/types.js'
-
-const prisma = new PrismaClient()
 const wsService = new PolymarketWebSocketService()
 const orchestrator = new TradeOrchestrator()
 
@@ -53,6 +52,26 @@ function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...arg
 function subscribeToAllTrades() {
   wsService.subscribeToAllTrades()
   log('info', '✓ Subscribed to all Polymarket trades')
+}
+
+// Subscribe to price changes for active markets
+async function subscribeToPriceChanges() {
+  const conditionIds = await realtimePriceService.subscribeToActiveMarkets()
+
+  if (conditionIds.length > 0) {
+    wsService.subscribeToPriceChanges(conditionIds)
+    log('info', `✓ Subscribed to price changes for ${conditionIds.length} markets`)
+  } else {
+    log('warn', 'No active markets to subscribe to for price changes')
+  }
+}
+
+// Re-subscribe to price changes periodically to catch new positions
+function schedulePriceSubscriptionUpdates() {
+  setInterval(async () => {
+    log('debug', 'Updating price change subscriptions...')
+    await subscribeToPriceChanges()
+  }, 5 * 60 * 1000) // Every 5 minutes
 }
 
 // Handle incoming trades
@@ -114,15 +133,29 @@ async function main() {
       log('info', 'Subscribing to all trades...')
       subscribeToAllTrades()
 
-      // Register trade handler
-      wsService.onTrade(handleTrade)
+      // Subscribe to price changes
+      log('info', 'Subscribing to price changes for active markets...')
+      await subscribeToPriceChanges()
 
-      log('info', '\n✓ Listener is now active and monitoring all trades')
-      log('info', '  Orchestrator will filter for followed traders')
+      // Register handlers
+      wsService.onTrade(handleTrade)
+      wsService.onPriceChange(async (priceChanges) => {
+        await realtimePriceService.handlePriceChange(priceChanges)
+      })
+      wsService.onLastTradePrice(async (lastTradePrice) => {
+        await realtimePriceService.handleLastTradePrice(lastTradePrice)
+      })
+
+      log('info', '\n✓ Listener is now active and monitoring:')
+      log('info', '  - All trader activity')
+      log('info', '  - Real-time price changes')
       log('info', '  Press Ctrl+C to stop\n')
 
       // Print stats every 5 minutes
       setInterval(printStats, 5 * 60 * 1000)
+
+      // Update price subscriptions every 5 minutes
+      schedulePriceSubscriptionUpdates()
     } catch (error) {
       log('error', '✗ Connection error:', error)
 

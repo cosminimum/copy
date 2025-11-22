@@ -1,12 +1,14 @@
 import { RealTimeDataClient } from '@polymarket/real-time-data-client'
 import type { Message } from '@polymarket/real-time-data-client'
-import { TradeMessage, SubscriptionConfig, TraderToFollow } from './types'
+import { TradeMessage, SubscriptionConfig, TraderToFollow, PriceChanges, LastTradePrice } from './types'
 
 export class PolymarketWebSocketService {
   private client: RealTimeDataClient | null = null
   private isConnected = false
   private subscriptions: Map<string, SubscriptionConfig> = new Map()
-  private tradeHandlers: ((trade: TradeMessage) => void)[] = []
+  private tradeHandlers: ((trade: TradeMessage) => Promise<void>)[] = []
+  private priceChangeHandlers: ((priceChanges: PriceChanges) => Promise<void>)[] = []
+  private lastTradePriceHandlers: ((lastTradePrice: LastTradePrice) => Promise<void>)[] = []
   private errorHandlers: ((error: Error) => void)[] = []
   private connectHandlers: (() => void)[] = []
   private disconnectHandlers: (() => void)[] = []
@@ -19,18 +21,46 @@ export class PolymarketWebSocketService {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        const onMessage = (client: RealTimeDataClient, message: Message): void => {
+        const onMessage = async (client: RealTimeDataClient, message: Message): Promise<void> => {
           try {
+            // Handle trade messages
             if (message.topic === 'activity' && message.type === 'trades') {
               const trade = message.payload as TradeMessage
-              this.tradeHandlers.forEach(handler => {
+              // Process handlers sequentially to prevent race conditions
+              for (const handler of this.tradeHandlers) {
                 try {
-                  handler(trade)
+                  await handler(trade)
                 } catch (error) {
                   console.error('Error in trade handler:', error)
                   this.errorHandlers.forEach(eh => eh(error as Error))
                 }
-              })
+              }
+            }
+
+            // Handle price change messages
+            if (message.topic === 'clob_market' && message.type === 'price_change') {
+              const priceChanges = message.payload as PriceChanges
+              for (const handler of this.priceChangeHandlers) {
+                try {
+                  await handler(priceChanges)
+                } catch (error) {
+                  console.error('Error in price change handler:', error)
+                  this.errorHandlers.forEach(eh => eh(error as Error))
+                }
+              }
+            }
+
+            // Handle last trade price messages
+            if (message.topic === 'clob_market' && message.type === 'last_trade_price') {
+              const lastTradePrice = message.payload as LastTradePrice
+              for (const handler of this.lastTradePriceHandlers) {
+                try {
+                  await handler(lastTradePrice)
+                } catch (error) {
+                  console.error('Error in last trade price handler:', error)
+                  this.errorHandlers.forEach(eh => eh(error as Error))
+                }
+              }
             }
           } catch (error) {
             console.error('Error processing message:', error)
@@ -178,12 +208,61 @@ export class PolymarketWebSocketService {
     this.subscriptions.delete(key)
   }
 
-  onTrade(handler: (trade: TradeMessage) => void): () => void {
+  onTrade(handler: (trade: TradeMessage) => Promise<void>): () => void {
     this.tradeHandlers.push(handler)
 
     return () => {
       this.tradeHandlers = this.tradeHandlers.filter(h => h !== handler)
     }
+  }
+
+  onPriceChange(handler: (priceChanges: PriceChanges) => Promise<void>): () => void {
+    this.priceChangeHandlers.push(handler)
+
+    return () => {
+      this.priceChangeHandlers = this.priceChangeHandlers.filter(h => h !== handler)
+    }
+  }
+
+  onLastTradePrice(handler: (lastTradePrice: LastTradePrice) => Promise<void>): () => void {
+    this.lastTradePriceHandlers.push(handler)
+
+    return () => {
+      this.lastTradePriceHandlers = this.lastTradePriceHandlers.filter(h => h !== handler)
+    }
+  }
+
+  subscribeToPriceChanges(conditionIds: string[]): void {
+    if (conditionIds.length === 0) {
+      console.warn('No condition IDs provided for price change subscription')
+      return
+    }
+
+    const config: SubscriptionConfig = {
+      topic: 'clob_market',
+      type: 'price_change',
+      filters: JSON.stringify(conditionIds),
+    }
+
+    const key = `price-changes-${conditionIds.join(',')}`
+    this.subscriptions.set(key, config)
+
+    if (this.isConnected && this.client) {
+      this.subscribeToConfig(config)
+    }
+  }
+
+  unsubscribeFromPriceChanges(conditionIds: string[]): void {
+    const key = `price-changes-${conditionIds.join(',')}`
+    const config = this.subscriptions.get(key)
+
+    if (config && this.client && this.isConnected) {
+      this.client.unsubscribe({
+        subscriptions: [config],
+      })
+    }
+
+    this.subscriptions.delete(key)
   }
 
   onError(handler: (error: Error) => void): () => void {
@@ -217,6 +296,8 @@ export class PolymarketWebSocketService {
       this.isConnected = false
       this.subscriptions.clear()
       this.tradeHandlers = []
+      this.priceChangeHandlers = []
+      this.lastTradePriceHandlers = []
       this.errorHandlers = []
       this.connectHandlers = []
       this.disconnectHandlers = []

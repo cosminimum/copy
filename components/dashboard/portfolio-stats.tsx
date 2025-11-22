@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
+import { useRealtimePrices } from '@/hooks/use-realtime-prices'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface PortfolioStats {
@@ -26,12 +27,16 @@ async function fetchDashboardStats(): Promise<PortfolioStats> {
 export function PortfolioStats() {
   const { status } = useSession()
 
+  // Connect to real-time price updates
+  useRealtimePrices()
+
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: fetchDashboardStats,
     enabled: status === 'authenticated',
-    refetchInterval: 30 * 1000, // Refetch every 30 seconds
-    staleTime: 30 * 1000, // Consider data stale after 30 seconds
+    // Reduce polling - rely on real-time updates
+    refetchInterval: 60 * 1000, // Refetch every 60 seconds as backup
+    staleTime: 30 * 1000,
   })
 
   if (isLoading || status === 'loading') {

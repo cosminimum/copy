@@ -192,70 +192,151 @@ export class TradeOrchestrator {
       const actualSize = executionResult.fillAmount || calculatedTrade.size;
       const actualValue = executionResult.actualCost || calculatedTrade.value;
 
-      const tradeRecord = await prisma.trade.create({
-        data: {
-          userId,
-          traderWalletAddress,
-          traderName,
-          market: calculatedTrade.market,
-          asset: calculatedTrade.asset,
-          conditionId: calculatedTrade.conditionId,
-          outcome: calculatedTrade.outcome,
-          outcomeIndex: calculatedTrade.outcomeIndex,
-          side: calculatedTrade.side,
-          price: calculatedTrade.price,
-          size: actualSize, // Use actual filled amount, not requested amount
-          value: actualValue, // Use actual cost, not calculated value
-          fee: executionResult.gasFee || 0,
-          transactionHash: executionResult.transactionHash,
-          positionKey: executionResult.positionKey,
-          blockNumber: executionResult.blockNumber ? BigInt(executionResult.blockNumber) : null,
-          gasUsed: executionResult.gasUsed,
-          gasPaid: executionResult.gasFee,
-          // COMPLETED: trade executed successfully (tx already confirmed in executor)
-          // FAILED: trade execution failed
-          status: executionResult.success ? 'COMPLETED' : 'FAILED',
-          executionType: 'COPY',
-          errorMessage: executionResult.error
-            ? `[${executionResult.errorCode || 'ERROR'}] ${executionResult.error}`
-            : null,
-          timestamp: executionResult.executedAt,
-        },
-      })
-
-      if (executionResult.success) {
-        // Create trade object with actual filled amounts for position tracking
-        const actualTrade = {
-          ...calculatedTrade,
-          size: actualSize,
-          value: actualValue,
-        };
-        await this.updateOrCreatePosition(userId, actualTrade, tradeRecord.id)
-
-        await this.createNotification(
-          userId,
-          'TRADE_EXECUTED',
-          'Trade Executed',
-          `${calculatedTrade.side} ${calculatedTrade.size} @ $${calculatedTrade.price}`,
-          { tradeId: tradeRecord.id }
-        )
+      // Serialize execution result to handle BigInt values
+      const serializeExecutionResult = (result: any) => {
+        return {
+          ...result,
+          gasUsed: result.gasUsed ? result.gasUsed.toString() : undefined,
+          blockNumber: result.blockNumber ? result.blockNumber.toString() : undefined,
+        }
       }
 
-      await prisma.activityLog.create({
-        data: {
-          userId,
-          action: 'COPY_TRADE_EXECUTED',
-          description: `Copy trade ${executionResult.success ? 'succeeded' : 'failed'}: ${calculatedTrade.side} ${calculatedTrade.size} in ${calculatedTrade.market}`,
-          metadata: JSON.parse(JSON.stringify({
-            tradeId: tradeRecord.id,
-            originalTrade,
-            executionResult,
-          })),
-        },
+      // Wrap all database operations in a transaction to ensure atomicity
+      await prisma.$transaction(async (tx) => {
+        const tradeRecord = await tx.trade.create({
+          data: {
+            userId,
+            traderWalletAddress,
+            traderName,
+            market: calculatedTrade.market,
+            asset: calculatedTrade.asset,
+            conditionId: calculatedTrade.conditionId,
+            outcome: calculatedTrade.outcome,
+            outcomeIndex: calculatedTrade.outcomeIndex,
+            side: calculatedTrade.side,
+            price: calculatedTrade.price,
+            size: actualSize, // Use actual filled amount, not requested amount
+            value: actualValue, // Use actual cost, not calculated value
+            fee: executionResult.gasFee || 0,
+            transactionHash: executionResult.transactionHash,
+            positionKey: executionResult.positionKey,
+            blockNumber: executionResult.blockNumber ? BigInt(executionResult.blockNumber) : null,
+            gasUsed: executionResult.gasUsed,
+            gasPaid: executionResult.gasFee,
+            // COMPLETED: trade executed successfully (tx already confirmed in executor)
+            // FAILED: trade execution failed
+            status: executionResult.success ? 'COMPLETED' : 'FAILED',
+            executionType: 'COPY',
+            errorMessage: executionResult.error
+              ? `[${executionResult.errorCode || 'ERROR'}] ${executionResult.error}`
+              : null,
+            timestamp: executionResult.executedAt,
+          },
+        })
+
+        if (executionResult.success) {
+          // Create trade object with actual filled amounts for position tracking
+          const actualTrade = {
+            ...calculatedTrade,
+            size: actualSize,
+            value: actualValue,
+          };
+          await this.updateOrCreatePositionInTransaction(tx, userId, actualTrade, tradeRecord.id)
+
+          await this.createNotificationInTransaction(
+            tx,
+            userId,
+            'TRADE_EXECUTED',
+            'Trade Executed',
+            `${calculatedTrade.side} ${calculatedTrade.size} @ $${calculatedTrade.price}`,
+            { tradeId: tradeRecord.id }
+          )
+        }
+
+        await tx.activityLog.create({
+          data: {
+            userId,
+            action: 'COPY_TRADE_EXECUTED',
+            description: `Copy trade ${executionResult.success ? 'succeeded' : 'failed'}: ${calculatedTrade.side} ${calculatedTrade.size} in ${calculatedTrade.market}`,
+            metadata: JSON.parse(JSON.stringify({
+              tradeId: tradeRecord.id,
+              originalTrade,
+              executionResult: serializeExecutionResult(executionResult),
+            })),
+          },
+        })
       })
     } catch (error) {
       console.error('Error executing copy trade:', error)
       throw error // Re-throw so outer catch can count it as failed
+    }
+  }
+
+  private async updateOrCreatePositionInTransaction(
+    tx: any,
+    userId: string,
+    trade: any,
+    tradeId: string
+  ): Promise<void> {
+    // Use FOR UPDATE to lock the row and prevent race conditions
+    const existingPosition = await tx.$queryRaw`
+      SELECT * FROM "Position"
+      WHERE "userId" = ${userId}
+        AND "market" = ${trade.market}
+        AND "asset" = ${trade.asset}
+        AND "outcome" = ${trade.outcome}
+        AND "status" = 'OPEN'
+      FOR UPDATE
+      LIMIT 1
+    `.then((rows: any[]) => rows[0] || null)
+
+    if (existingPosition) {
+      const newSize = existingPosition.size + (trade.side === 'BUY' ? trade.size : -trade.size)
+
+      if (newSize <= 0) {
+        await tx.position.update({
+          where: { id: existingPosition.id },
+          data: {
+            status: 'CLOSED',
+            closedAt: new Date(),
+            size: 0,
+          },
+        })
+      } else {
+        const newAvgPrice = (
+          (existingPosition.entryPrice * existingPosition.size + trade.price * trade.size) /
+          (existingPosition.size + trade.size)
+        )
+
+        await tx.position.update({
+          where: { id: existingPosition.id },
+          data: {
+            size: newSize,
+            entryPrice: newAvgPrice,
+            currentPrice: trade.price,
+            value: newSize * trade.price,
+            unrealizedPnL: (trade.price - newAvgPrice) * newSize,
+          },
+        })
+      }
+    } else {
+      await tx.position.create({
+        data: {
+          userId,
+          market: trade.market,
+          asset: trade.asset,
+          conditionId: trade.conditionId,
+          outcome: trade.outcome,
+          outcomeIndex: trade.outcomeIndex,
+          side: trade.side,
+          entryPrice: trade.price,
+          currentPrice: trade.price,
+          size: trade.size,
+          value: trade.value,
+          unrealizedPnL: 0,
+          status: 'OPEN',
+        },
+      })
     }
   }
 
@@ -350,6 +431,25 @@ export class TradeOrchestrator {
     })
 
     return snapshot?.cashBalance || 10000
+  }
+
+  private async createNotificationInTransaction(
+    tx: any,
+    userId: string,
+    type: string,
+    title: string,
+    message: string,
+    metadata?: any
+  ): Promise<void> {
+    await tx.notification.create({
+      data: {
+        userId,
+        type,
+        title,
+        message,
+        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : undefined,
+      },
+    })
   }
 
   private async createNotification(
